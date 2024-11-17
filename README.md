@@ -1,4 +1,6 @@
-# dicekit
+<img src="imgs/dice.png" alt="dicekit logo" width="125" align="right"/>
+
+### dicekit
 
 > Just some nice objects in Python
 
