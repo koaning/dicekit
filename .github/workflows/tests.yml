@@ -13,5 +13,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: python -m pip install uv
-      - run: python -m pip install -e .
-      - run: python -m pytest tests/
+      - run: uv pip install -e . pytest
+      - run: uv run pytest tests/
