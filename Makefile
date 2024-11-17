@@ -1,5 +1,5 @@
 build:
-	uv run python script/build.py
+	uv run python nbs/build.py
 	uv run marimo export html nbs/__init__.py > docs/index.html
 
 install: 
