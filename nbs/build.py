@@ -1,5 +1,5 @@
 from marimo._ast.app import InternalApp
-from nbs import app
+from __init__ import app
 from pathlib import Path
 
 # Lets move out the code first
@@ -12,4 +12,4 @@ for i in order:
     if i in codes:
         code_export += codes[i].replace("## Export", "") + "\n"
 
-Path("nicedice/__init__.py").write_text(code_export)
+Path("dicekit/__init__.py").write_text(code_export)
