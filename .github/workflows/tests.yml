@@ -1,0 +1,33 @@
+name: Code Checks
+
+on:
+  push:
+    branches:
+    - main
+  pull_request:
+    branches:
+    - main
+
+jobs:
+  build:
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install uv
+      uses: astral-sh/setup-uv@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      run: uv python install ${{ matrix.python-version }}
+    - name: Install Venv
+      run: uv venv --python ${{ matrix.python-version }}
+    - name: Source
+      run: |
+        source .venv/bin/activate
+        which python
+        python --version
+        uv pip install -e . pytest
+        uv run pytest

@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.9.9"
+__generated_with = "0.9.20"
 app = marimo.App(width="medium")
 
 
@@ -22,7 +22,7 @@ def __(mo):
         The main object that you will interact with is the `Dice` object.
 
         ```python
-        from nicedice import Dice
+        from dicekit import Dice
         ```
 
         These objects give you a flexible way to declare dice, and they also come with a convient visualisation of the probability distribution that they represent.
@@ -75,7 +75,7 @@ def __(mo):
         When you have dice, you're typically also interested in their probabilities. You can use comparison operators for this, and we also have a convience function to give you the probability that you're interested in.
 
         ```python
-        from nicedice import p, exp, var
+        from dicekit import p, exp, var
         ```
         """
     )
@@ -112,18 +112,6 @@ def __(mo):
 @app.cell
 def __(d6, exp, var):
     exp(d6), var(d6)
-    return
-
-
-@app.cell
-def __(mo):
-    mo.md(
-        """
-        ## Implementation
-
-        This package is meant to be small and all the development takes place in a Marimo notebook. All the code for this project can be seen below. 
-        """
-    )
     return
 
 

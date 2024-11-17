@@ -48,7 +48,7 @@ class Dice:
             alt.Chart(df)
               .mark_bar()
               .encode(x="i", y="p")
-              .properties(title="Dice with probabilities:", width=140, height=140)
+              .properties(title="Dice with probabilities:", width=120, height=120)
         )
 
     def out_of(self, n=2, func=max):
@@ -80,6 +80,7 @@ class Dice:
 
     def __len__(self):
         return len(self.probs)
+
 
 def p(expression):
     return expression.probs[True]
