@@ -2,7 +2,7 @@
 
 ### dicekit
 
-> Just some nice objects in Python. We mainly target Marimo for now.
+> Just some nice `Dice` objects in Python. We mainly target Marimo for now.
 
 ## Install
 
