@@ -7,3 +7,6 @@ install:
 	uv venv
 	uv pip install -e . marimo
 
+pypi:
+	uv build
+	uv publish
