@@ -8,14 +8,12 @@ app = marimo.App(width="medium")
 def __(mo):
     mo.md(
         """
-        ## `nicedice`
+        ## `dicekit`
 
-        The goal of `nicedice` is two-fold. 
+        The goal of `dicekit` is two-fold. 
 
         - The first is to offer a simple library to interact with dice.
-        - The second is to explore how Marimo may give us a domain specific environment to work/develop with `nicedice`.
-
-        We could just work on a domain specific languge, but what if we can adapt the environment around the language a bit more so that it promotes interactivity and curiosity a bit more?
+        - The second is to explore how Marimo may give us a domain specific environment to work/develop with dice. We could just work on a domain specific languge, but what if we can adapt the environment around the language a bit more so that it promotes interactivity and curiosity a bit more?
 
         ## `Dice` objects 
 
