@@ -114,6 +114,20 @@ def __(d6, exp, var):
 
 
 @app.cell
+def __(mo):
+    mo.md(
+        r"""
+        ## Implementation 
+
+        Fun fact: this library is completely defined and maintained from a Marimo notebook! The convenience here is that I can glance at the notebook to confirm if it is working and it also reinforces a good documentation practice. Feel free to explore [the repository](https://github.com/koaning/dicekit) to learn out it is set up. 
+
+        You can also inspect the full implementation below. 
+        """
+    )
+    return
+
+
+@app.cell
 def __():
     ## Export 
 
