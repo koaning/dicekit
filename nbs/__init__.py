@@ -1,87 +1,94 @@
 import marimo
 
-__generated_with = "0.9.20"
+__generated_with = "0.13.6"
 app = marimo.App(width="medium")
 
 
 @app.cell(hide_code=True)
-def __(mo):
+def _(mo):
     mo.md(
         """
-        ## `dicekit`
+    ## `dicekit`
 
-        The goal of `dicekit` is two-fold. 
+    The goal of `dicekit` is two-fold. 
 
-        - The first is to offer a simple library to interact with dice.
-        - The second is to explore how Marimo may give us a domain specific environment to work/develop with dice. We could just work on a domain specific languge, but what if we can adapt the environment around the language a bit more so that it promotes interactivity and curiosity a bit more?
+    - The first is to offer a simple library to interact with dice.
+    - The second is to explore how Marimo may give us a domain specific environment to work/develop with dice. We could just work on a domain specific languge, but what if we can adapt the environment around the language a bit more so that it promotes interactivity and curiosity a bit more?
 
-        ## `Dice` objects 
+    ## `Dice` objects 
 
-        The main object that you will interact with is the `Dice` object.
+    The main object that you will interact with is the `Dice` object.
 
-        ```python
-        from dicekit import Dice
-        ```
+    ```python
+    from dicekit import Dice
+    ```
 
-        These objects give you a flexible way to declare dice, and they also come with a convient visualisation of the probability distribution that they represent.
-        """
+    These objects give you a flexible way to declare dice, and they also come with a convient visualisation of the probability distribution that they represent.
+    """
     )
     return
 
 
 @app.cell
-def __(Dice):
+def _(Dice):
     Dice.from_sides(6)
     return
 
 
 @app.cell
-def __(mo):
+def _(mo):
     mo.md("""These dice can be stored into variables, but they can also be added/subtracted as if they were normal Python numbers.""")
     return
 
 
 @app.cell
-def __(Dice):
+def _(Dice):
     d6 = Dice.from_sides(6)
     d8 = Dice.from_sides(8)
 
     d6 + d8
-    return d6, d8
+    return (d6,)
 
 
 @app.cell
-def __(mo):
+def _(mo):
     mo.md("""These dice have a bunch of utilities attached that make it easy to get the distribution that you are interested in. For example, what if you are interested in the maximum of two dice rolls? You can use the `.out_of` method for that.""")
     return
 
 
 @app.cell
-def __(Dice, mo):
+def _(mo):
+    sides_slider = mo.ui.slider(1, 100, 1, value=20, label="sides")
+    sides_slider
+    return (sides_slider,)
+
+
+@app.cell
+def _(Dice, mo, sides_slider):
     mo.hstack([
-        Dice.from_sides(20), 
-        Dice.from_sides(20).out_of(2, max),
-        Dice.from_sides(20).out_of(3, max),
+        Dice.from_sides(sides_slider.value), 
+        Dice.from_sides(sides_slider.value).out_of(2, max),
+        Dice.from_sides(sides_slider.value).out_of(3, max),
     ])
     return
 
 
 @app.cell
-def __(mo):
+def _(mo):
     mo.md(
         """
-        When you have dice, you're typically also interested in their probabilities. You can use comparison operators for this, and we also have a convience function to give you the probability that you're interested in.
+    When you have dice, you're typically also interested in their probabilities. You can use comparison operators for this, and we also have a convience function to give you the probability that you're interested in.
 
-        ```python
-        from dicekit import p, exp, var
-        ```
-        """
+    ```python
+    from dicekit import p, exp, var
+    ```
+    """
     )
     return
 
 
 @app.cell
-def __(Dice, p):
+def _(Dice, p):
     d20 = Dice.from_sides(20)
 
     # DnD rules, how much more likely are you to win when you are at advantage?
@@ -90,45 +97,45 @@ def __(Dice, p):
 
 
 @app.cell
-def __(mo):
+def _(mo):
     mo.md(r"""Under the hood, a comparison operator merely generates another `Dice`.""")
     return
 
 
 @app.cell
-def __(d20):
+def _(d20):
     d20.out_of(2, max) > d20.out_of(2, min)
     return
 
 
 @app.cell
-def __(mo):
+def _(mo):
     mo.md(r"""There are also some other convenience functions available such as `exp` and `var`.""")
     return
 
 
 @app.cell
-def __(d6, exp, var):
+def _(d6, exp, var):
     exp(d6), var(d6)
     return
 
 
 @app.cell
-def __(mo):
+def _(mo):
     mo.md(
         r"""
-        ## Implementation 
+    ## Implementation 
 
-        Fun fact: this library is completely defined and maintained from a Marimo notebook! The convenience here is that I can glance at the notebook to confirm if it is working and it also reinforces a good documentation practice. Feel free to explore [the repository](https://github.com/koaning/dicekit) to learn out it is set up. 
+    Fun fact: this library is completely defined and maintained from a Marimo notebook! The convenience here is that I can glance at the notebook to confirm if it is working and it also reinforces a good documentation practice. Feel free to explore [the repository](https://github.com/koaning/dicekit) to learn out it is set up. 
 
-        You can also inspect the full implementation below. 
-        """
+    You can also inspect the full implementation below.
+    """
     )
     return
 
 
 @app.cell
-def __():
+def _():
     ## Export 
 
     import altair as alt 
@@ -211,11 +218,11 @@ def __():
 
         def __len__(self):
             return len(self.probs)
-    return Counter, Dice, alt, mo, pd, random
+    return Dice, mo
 
 
 @app.cell
-def __():
+def _():
     ## Export
 
     def p(expression):
