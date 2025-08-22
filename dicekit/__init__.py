@@ -90,3 +90,26 @@ def exp(dice):
 
 def var(dice):
     return sum(p * (i - exp(dice))**2 for i, p in dice.probs.items())
+
+def ordered(*dice_in):
+    """
+    Return dice that represent order statistics. Highest first. 
+    """
+    result = {}
+    for _i in product(*[d.probs.items() for d in dice_in]):
+        eyes = tuple(sorted([_[0] for _ in _i], reverse=True))
+        prob = reduce(lambda a, b: a * b, [_[1] for _ in _i])
+        if eyes not in result:
+            result[eyes] = 0
+        result[eyes] += prob
+    
+    dice_out = []
+    for _j in range(len(dice_in)):
+        new_dice = {}
+        for keys, pval in result.items():
+            if keys[_j] not in new_dice:
+                new_dice[keys[_j]] = 0
+            new_dice[keys[_j]] += pval
+        dice_out.append(Dice(new_dice))
+    return dice_out
+
