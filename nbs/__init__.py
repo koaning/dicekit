@@ -8,7 +8,7 @@ app = marimo.App(width="medium")
 def _(mo):
     mo.md(
         """
-    ## `dicekit`
+    # `dicekit`
 
     The goal of `dicekit` is two-fold. 
 
@@ -92,7 +92,7 @@ def _(Dice, p):
     d20 = Dice.from_sides(20)
 
     # DnD rules, how much more likely are you to win when you are at advantage?
-    p(d20.out_of(2, max) > d20.out_of(2, min))
+    p(d20.out_of(2, max) > d20)
     return (d20,)
 
 
@@ -104,7 +104,7 @@ def _(mo):
 
 @app.cell
 def _(d20):
-    d20.out_of(2, max) > d20.out_of(2, min)
+    d20.out_of(2, max) > d20
     return
 
 
@@ -117,6 +117,62 @@ def _(mo):
 @app.cell
 def _(d6, exp, var):
     exp(d6), var(d6)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+    ## Order Statistics
+
+    The library also comes with an `ordered` function that lets you calculate order statistics from a set of dice. 
+
+    ```python 
+    from dicekit import ordered
+    ```
+
+    In the example below we explore a situation from the Risk boardgame. There are three attacking armies and two defending ones.
+    """
+    )
+    return
+
+
+@app.cell
+def _(d6, mo, ordered):
+    a1, a2, a3 = ordered(d6, d6, d6)
+    d1, d2 = ordered(d6, d6)
+
+    mo.hstack([a1 > d1, a2 > d2])
+    return a1, a2, d1, d2
+
+
+@app.cell(hide_code=True)
+def _(a1, a2, d1, d2, mo, p):
+    mo.md(f"""The probability that the best attacking army defeats the defending army is {p(a1 > d1):.3f}. But the second best attacking army has a bigger chance: {p(a2 > d2):.3f}. These numbers are confirmed with the simulation below.""")
+    return
+
+
+@app.cell
+def _(a1, d6):
+    a1, d6.out_of(3, max)
+    return
+
+
+@app.cell
+def _(random):
+    # Simulation, just in case to check. This is not part of the library.
+    from statistics import mean 
+
+    def simulate(n=10_000):
+        results = []
+        for _ in range(n):
+            a1, a2, a3 = sorted([random.randint(1,6) for _ in range(3)], reverse=True)
+            d1, d2 = sorted([random.randint(1,6) for _ in range(2)], reverse=True)
+            results.append((a1 > d1, a2 > d2))
+        return mean([_[0] for _ in results]), mean([_[1] for _ in results])
+
+    simulate()
     return
 
 
@@ -143,19 +199,21 @@ def _():
     import marimo as mo
     import random 
     from collections import Counter
+    from itertools import product
+    from functools import reduce
 
     class Dice:
         """
         A class representing dice with arbitrary probability distributions.
-    
+
         This class allows creating, manipulating, and visualizing dice with
         custom probability distributions for each face value.
         """
-    
+
         def __init__(self, probs):
             """
             Initialize a Dice object with given probabilities.
-        
+
             Parameters:
                 probs (dict): A dictionary mapping face values to probabilities
             """
@@ -165,10 +223,10 @@ def _():
         def from_sides(cls, n=6):
             """
             Create a fair dice with n sides.
-        
+
             Parameters:
                 n (int): Number of sides, default is 6
-            
+
             Returns:
                 Dice: A fair dice with n sides
             """
@@ -178,10 +236,10 @@ def _():
         def from_numbers(cls, *args):
             """
             Create a dice from a sequence of numbers with frequencies.
-        
+
             Parameters:
                 *args: Variable length list of numbers
-            
+
             Returns:
                 Dice: A dice with probabilities based on the frequency of each number
             """
@@ -191,10 +249,10 @@ def _():
         def roll(self, n=1):
             """
             Simulate rolling the dice n times.
-        
+
             Parameters:
                 n (int): Number of rolls, default is 1
-            
+
             Returns:
                 list: Results of the dice rolls
             """
@@ -203,11 +261,11 @@ def _():
         def operate(self, other, operator):
             """
             Apply an operation between this dice and another dice or number.
-        
+
             Parameters:
                 other: Another Dice object or a number
                 operator: A function that takes two arguments and returns a result
-            
+
             Returns:
                 Dice: A new dice representing the distribution of the operation's results
             """
@@ -225,10 +283,10 @@ def _():
         def filter(self, func):
             """
             Create a new dice by filtering face values based on a function.
-        
+
             Parameters:
                 func: A function that returns True for values to keep
-            
+
             Returns:
                 Dice: A new dice with only the filtered values, renormalized
             """
@@ -239,7 +297,7 @@ def _():
         def _repr_html_(self):
             """
             Return HTML representation of the dice for display in notebooks.
-        
+
             Returns:
                 str: HTML string for rendering
             """
@@ -248,7 +306,7 @@ def _():
         def prob_chart(self):
             """
             Create a visualization of the dice probability distribution.
-        
+
             Returns:
                 alt.Chart: An Altair chart showing the dice distribution
             """
@@ -271,18 +329,24 @@ def _():
         def out_of(self, n=2, func=max):
             """
             Create a dice representing the result of applying a function to n rolls.
-        
+
             Parameters:
                 n (int): Number of dice to roll, default is 2
                 func: Function to apply to the rolls (e.g., max, min), default is max
-            
+
             Returns:
                 Dice: A new dice representing the distribution of the function's results
             """
-            current = Dice(self.probs)
-            for i in range(n - 1):
-                current = current.operate(current, operator=lambda a, b: func(a, b))
-            return current
+            result = {}
+            dice_in = [self] * n
+            for _i in product(*[d.probs.items() for d in dice_in]):
+                values = [_[0] for _ in _i]
+                prob = reduce(lambda a, b: a * b, [_[1] for _ in _i])
+                outcome = func(values)
+                if outcome not in result:
+                    result[outcome] = 0
+                result[outcome] += prob
+            return Dice(result)
 
         def __add__(self, other):
             return self.operate(other, lambda a,b: a + b)
@@ -307,7 +371,7 @@ def _():
 
         def __len__(self):
             return len(self.probs)
-    return Dice, mo
+    return Dice, mo, product, random, reduce
 
 
 @app.cell
@@ -317,10 +381,10 @@ def _(Dice, product, reduce):
     def p(expression):
         """
         Returns the probability of a True outcome from a dice expression.
-    
+
         Parameters:
             expression: A Dice object representing a boolean comparison
-    
+
         Returns:
             float: The probability of the True outcome
         """
@@ -329,10 +393,10 @@ def _(Dice, product, reduce):
     def exp(dice):
         """
         Calculates the expected value (mean) of a dice.
-    
+
         Parameters:
             dice: A Dice object
-    
+
         Returns:
             float: The expected value of the dice
         """
@@ -341,10 +405,10 @@ def _(Dice, product, reduce):
     def var(dice):
         """
         Calculates the variance of a dice.
-    
+
         Parameters:
             dice: A Dice object
-    
+
         Returns:
             float: The variance of the dice
         """
@@ -353,13 +417,13 @@ def _(Dice, product, reduce):
     def ordered(*dice_in):
         """
         Return dice that represent order statistics. Highest first.
-    
+
         Takes multiple dice objects and returns new dice objects that represent
         the ordered outcomes (e.g., highest roll, second highest roll, etc.).
-    
+
         Parameters:
             *dice_in: Variable number of Dice objects
-    
+
         Returns:
             list: A list of Dice objects representing order statistics
         """
@@ -370,7 +434,7 @@ def _(Dice, product, reduce):
             if eyes not in result:
                 result[eyes] = 0
             result[eyes] += prob
-    
+
         dice_out = []
         for _j in range(len(dice_in)):
             new_dice = {}
@@ -380,7 +444,12 @@ def _(Dice, product, reduce):
                 new_dice[keys[_j]] += pval
             dice_out.append(Dice(new_dice))
         return dice_out
-    return exp, p, var
+    return exp, ordered, p, var
+
+
+@app.cell
+def _():
+    return
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
-from dicekit import Dice, p, exp, var
+import pytest
+from dicekit import Dice, p, exp, var, ordered
 
 def test_dice_creation():
     # Test basic dice creation
@@ -66,3 +67,21 @@ def test_dice_roll():
     rolls = d6.roll(1000)
     assert len(rolls) == 1000
     assert all(1 <= r <= 6 for r in rolls)
+
+def test_dice_ordered_2():
+    d6 = Dice.from_sides(6)
+    a1, a2 = ordered(d6, d6)
+    assert a1.probs[1] == 1/6/6
+    for k, v in a1.probs.items():
+        assert abs(v - d6.out_of(2, max).probs[k]) < 1e-10
+    for k, v in a2.probs.items():
+        assert abs(v - d6.out_of(2, min).probs[k]) < 1e-10
+
+def test_dice_ordered_3():
+    d6 = Dice.from_sides(6)
+    a1, _, a3 = ordered(d6, d6, d6)
+    assert a1.probs[1] == 1/6/6/6
+    for k, v in a1.probs.items():
+        assert abs(v - d6.out_of(3, max).probs[k]) < 1e-8
+    for k, v in a3.probs.items():
+        assert abs(v - d6.out_of(3, min).probs[k]) < 1e-8

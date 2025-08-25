@@ -5,6 +5,8 @@ import pandas as pd
 import marimo as mo
 import random 
 from collections import Counter
+from itertools import product
+from functools import reduce
 
 class Dice:
     """
@@ -141,10 +143,16 @@ class Dice:
         Returns:
             Dice: A new dice representing the distribution of the function's results
         """
-        current = Dice(self.probs)
-        for i in range(n - 1):
-            current = current.operate(current, operator=lambda a, b: func(a, b))
-        return current
+        result = {}
+        dice_in = [self] * n
+        for _i in product(*[d.probs.items() for d in dice_in]):
+            values = [_[0] for _ in _i]
+            prob = reduce(lambda a, b: a * b, [_[1] for _ in _i])
+            outcome = func(values)
+            if outcome not in result:
+                result[outcome] = 0
+            result[outcome] += prob
+        return Dice(result)
 
     def __add__(self, other):
         return self.operate(other, lambda a,b: a + b)
