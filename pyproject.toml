@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dicekit"
-version = "0.1.1"
+version = "0.1.2"
 description="Domain specific environment for dice"
 
 license = {file = "LICENSE"}
