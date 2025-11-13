@@ -1,3 +1,5 @@
+[![Open in molab](https://marimo.io/molab-shield.svg)](https://molab.marimo.io/github/koaning/dicekit/blob/main/nbs/__init__.py)
+
 <img src="imgs/dice.png" alt="dicekit logo" width="125" align="right"/>
 
 ### dicekit
