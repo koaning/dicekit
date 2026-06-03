@@ -326,6 +326,20 @@ def _():
                   .interactive()
             )
 
+        def ordered(self, n, k=None):
+            """
+            Take the dice `n` times and calculate the ordered distributions for it.
+
+            Optionally you can also take `k` of these dice.
+
+            Returns:
+                List of ordered dice
+            """
+            items = [self] * n
+            if k:
+                return ordered(*items)[:k]
+            return ordered(*items)
+
         def out_of(self, n=2, func=max):
             """
             Create a dice representing the result of applying a function to n rolls.
@@ -351,10 +365,19 @@ def _():
         def __add__(self, other):
             return self.operate(other, lambda a,b: a + b)
 
+        def __radd__(self, other):
+            return self.operate(other, lambda a,b: a + b)
+
         def __sub__(self, other):
             return self.operate(other, lambda a,b: a - b)
 
+        def __rsub__(self, other):
+            return self.operate(other, lambda a,b: b - a)
+
         def __mul__(self, other):
+            return self.operate(other, lambda a,b: a * b)
+
+        def __rmul__(self, other):
             return self.operate(other, lambda a,b: a * b)
 
         def __le__(self, other):

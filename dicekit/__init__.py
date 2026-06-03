@@ -1,9 +1,9 @@
- 
 
-import altair as alt 
+
+import altair as alt
 import pandas as pd
 import marimo as mo
-import random 
+import random
 from collections import Counter
 from itertools import product
 from functools import reduce
@@ -121,7 +121,7 @@ class Dice:
             alt.Chart(df)
               .mark_bar()
               .encode(
-                x="i", 
+                x="i",
                 y="p",
                 tooltip=[
                     alt.Tooltip("i", title="Value"),
@@ -131,6 +131,20 @@ class Dice:
               .properties(title="Dice with probabilities:", width=120, height=120)
               .interactive()
         )
+
+    def ordered(self, n, k=None):
+        """
+        Take the dice `n` times and calculate the ordered distributions for it.
+
+        Optionally you can also take `k` of these dice.
+
+        Returns:
+            List of ordered dice
+        """
+        items = [self] * n
+        if k:
+            return ordered(*items)[:k]
+        return ordered(*items)
 
     def out_of(self, n=2, func=max):
         """
@@ -157,10 +171,19 @@ class Dice:
     def __add__(self, other):
         return self.operate(other, lambda a,b: a + b)
 
+    def __radd__(self, other):
+        return self.operate(other, lambda a,b: a + b)
+
     def __sub__(self, other):
         return self.operate(other, lambda a,b: a - b)
 
+    def __rsub__(self, other):
+        return self.operate(other, lambda a,b: b - a)
+
     def __mul__(self, other):
+        return self.operate(other, lambda a,b: a * b)
+
+    def __rmul__(self, other):
         return self.operate(other, lambda a,b: a * b)
 
     def __le__(self, other):

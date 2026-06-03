@@ -28,6 +28,21 @@ def test_dice_operations():
     assert d_mult.probs[2] == 0.5   # P(1*2 or 2*1)
     assert d_mult.probs[4] == 0.25  # P(2*2)
 
+def test_dice_reflected_operations():
+    d = Dice({1: 0.5, 2: 0.5})
+
+    d_sum = 2 + d
+    assert d_sum.probs[3] == 0.5
+    assert d_sum.probs[4] == 0.5
+
+    d_sub = 2 - d
+    assert d_sub.probs[1] == 0.5
+    assert d_sub.probs[0] == 0.5
+
+    d_mult = 2 * d
+    assert d_mult.probs[2] == 0.5
+    assert d_mult.probs[4] == 0.5
+
 def test_dice_comparisons():
     d1 = Dice({1: 0.5, 2: 0.5})
     d2 = Dice({1: 0.5, 2: 0.5})
@@ -76,6 +91,19 @@ def test_dice_ordered_2():
         assert abs(v - d6.out_of(2, max).probs[k]) < 1e-10
     for k, v in a2.probs.items():
         assert abs(v - d6.out_of(2, min).probs[k]) < 1e-10
+
+def test_dice_ordered_method():
+    d6 = Dice.from_sides(6)
+    a1, a2 = d6.ordered(2)
+    assert a1.probs[1] == 1/6/6
+    for k, v in a1.probs.items():
+        assert abs(v - d6.out_of(2, max).probs[k]) < 1e-10
+    for k, v in a2.probs.items():
+        assert abs(v - d6.out_of(2, min).probs[k]) < 1e-10
+
+    highest, = d6.ordered(2, k=1)
+    for k, v in highest.probs.items():
+        assert abs(v - d6.out_of(2, max).probs[k]) < 1e-10
 
 def test_dice_ordered_3():
     d6 = Dice.from_sides(6)
