@@ -1,5 +1,5 @@
 import pytest
-from dicekit import Dice, p, exp, var, ordered
+from dicekit import Dice, Vase, p, exp, mix, var, ordered
 
 def test_dice_creation():
     # Test basic dice creation
@@ -28,6 +28,39 @@ def test_dice_operations():
     assert d_mult.probs[2] == 0.5   # P(1*2 or 2*1)
     assert d_mult.probs[4] == 0.25  # P(2*2)
 
+def test_dice_map():
+    dice = Dice({1: 0.25, 2: 0.25, 3: 0.5})
+
+    parity = dice.map(lambda value: "even" if value % 2 == 0 else "odd")
+    assert parity.probs == {"odd": 0.75, "even": 0.25}
+
+    labels = dice.map({1: "low", 2: "low", 3: "high"})
+    assert labels.probs == {"low": 0.5, "high": 0.5}
+
+def test_dice_mix():
+    first = Dice({"a": 1})
+    second = Dice({"b": 1})
+
+    even = mix(first, second)
+    assert even.probs == {"a": 0.5, "b": 0.5}
+
+    weighted = mix(first, second, weights=[1, 3])
+    assert weighted.probs == {"a": 0.25, "b": 0.75}
+
+def test_dice_mix_validates_arguments():
+    dice = Dice({1: 1})
+
+    with pytest.raises(TypeError, match="Dice objects"):
+        mix(dice, "not a dice")
+    with pytest.raises(ValueError, match="one value"):
+        mix(dice, dice, weights=[1])
+    with pytest.raises(ValueError, match="non-negative"):
+        mix(dice, dice, weights=[1, -1])
+    with pytest.raises(ValueError, match="positive sum"):
+        mix(dice, dice, weights=[0, 0])
+    with pytest.raises(ValueError, match="at least one"):
+        mix()
+
 def test_dice_reflected_operations():
     d = Dice({1: 0.5, 2: 0.5})
 
@@ -54,6 +87,13 @@ def test_dice_comparisons():
     # Test less than or equal
     d_le = d1 <= d2
     assert p(d_le) == 0.75  # P(1 ≤ 1 or 1 ≤ 2 or 2 ≤ 2) = 0.75
+
+def test_dice_equality_with_categorical_value():
+    draws = Vase.from_counts(a=3, b=3).take(3, replace=True, ordered=False)
+
+    assert p(draws == "bbb") == pytest.approx(1 / 8)
+    assert p(draws != "bbb") == pytest.approx(7 / 8)
+    assert p(draws == "ccc") == 0
 
 def test_dice_filter():
     d6 = Dice.from_sides(6)
@@ -108,7 +148,7 @@ def test_dice_ordered_method():
 def test_dice_ordered_3():
     d6 = Dice.from_sides(6)
     a1, _, a3 = ordered(d6, d6, d6)
-    assert a1.probs[1] == 1/6/6/6
+    assert a1.probs[1] == pytest.approx(1/6/6/6)
     for k, v in a1.probs.items():
         assert abs(v - d6.out_of(3, max).probs[k]) < 1e-8
     for k, v in a3.probs.items():

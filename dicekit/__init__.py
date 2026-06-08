@@ -4,9 +4,11 @@ import altair as alt
 import pandas as pd
 import marimo as mo
 import random
+from collections.abc import Mapping
 from collections import Counter
-from itertools import product
+from itertools import product, combinations, permutations, combinations_with_replacement
 from functools import reduce
+
 
 class Dice:
     """
@@ -23,7 +25,7 @@ class Dice:
         Parameters:
             probs (dict): A dictionary mapping face values to probabilities
         """
-        self.probs = probs
+        self.probs = {k: v / sum(probs.values()) for k, v in probs.items()}
 
     @classmethod
     def from_sides(cls, n=6):
@@ -36,7 +38,7 @@ class Dice:
         Returns:
             Dice: A fair dice with n sides
         """
-        return cls({i: 1/n for i in range(1, n+1)})
+        return cls({i: 1 / n for i in range(1, n + 1)})
 
     @classmethod
     def from_numbers(cls, *args):
@@ -50,7 +52,7 @@ class Dice:
             Dice: A dice with probabilities based on the frequency of each number
         """
         c = Counter(args)
-        return cls({k: v/len(args) for k, v in args.items()})
+        return cls({k: v / len(args) for k, v in args.items()})
 
     def roll(self, n=1):
         """
@@ -64,6 +66,35 @@ class Dice:
         """
         return random.choices(list(self.probs.keys()), weights=list(self.probs.values()), k=n)
 
+    def sample(self, n=1):
+        """
+        Simulate rolling the dice n times.
+
+        Parameters:
+            n (int): Number of rolls, default is 1
+
+        Returns:
+            list: Results of the dice rolls
+        """
+        return self.roll(n=1)
+
+    def map(self, transform):
+        """
+        Transform the outcomes of the dice.
+
+        Parameters:
+            transform: A callable or mapping from old outcomes to new outcomes
+
+        Returns:
+            Dice: A dice containing the transformed outcomes
+        """
+        func = transform.__getitem__ if isinstance(transform, Mapping) else transform
+        new_probs = {}
+        for outcome, probability in self.probs.items():
+            new_outcome = func(outcome)
+            new_probs[new_outcome] = new_probs.get(new_outcome, 0) + probability
+        return Dice(new_probs)
+
     def operate(self, other, operator):
         """
         Apply an operation between this dice and another dice or number.
@@ -75,8 +106,11 @@ class Dice:
         Returns:
             Dice: A new dice representing the distribution of the operation's results
         """
-        if isinstance(other, (float, int)):
-            other = Dice({other: 1})
+        if not isinstance(other, Dice):
+            try:
+                other = Dice({other: 1})
+            except TypeError as exc:
+                raise TypeError("operations require a Dice or hashable value") from exc
         new_probs = {}
         for s1, p1 in self.probs.items():
             for s2, p2 in other.probs.items():
@@ -98,7 +132,7 @@ class Dice:
         """
         new_probs = {k: v for k, v in self.probs.items() if func(k)}
         total_prob = sum(new_probs.values())
-        return Dice({k: v/total_prob for k, v in new_probs.items()})
+        return Dice({k: v / total_prob for k, v in new_probs.items()})
 
     def _repr_html_(self):
         """
@@ -119,17 +153,16 @@ class Dice:
         df = pd.DataFrame([{"i": k, "p": v} for k, v in self.probs.items()])
         return (
             alt.Chart(df)
-              .mark_bar()
-              .encode(
+            .mark_bar()
+            .encode(
                 x="i",
                 y="p",
                 tooltip=[
                     alt.Tooltip("i", title="Value"),
-                    alt.Tooltip("p", title="Probability", format=".3f")
-                ]
-              )
-              .properties(title="Dice with probabilities:", width=120, height=120)
-              .interactive()
+                    alt.Tooltip("p", title="Probability", format=".3f"),
+                ],
+            )
+            .properties(title="Dice with probabilities:", width=120, height=120)
         )
 
     def ordered(self, n, k=None):
@@ -169,37 +202,113 @@ class Dice:
         return Dice(result)
 
     def __add__(self, other):
-        return self.operate(other, lambda a,b: a + b)
+        return self.operate(other, lambda a, b: a + b)
 
     def __radd__(self, other):
-        return self.operate(other, lambda a,b: a + b)
+        return self.operate(other, lambda a, b: a + b)
 
     def __sub__(self, other):
-        return self.operate(other, lambda a,b: a - b)
+        return self.operate(other, lambda a, b: a - b)
 
     def __rsub__(self, other):
-        return self.operate(other, lambda a,b: b - a)
+        return self.operate(other, lambda a, b: b - a)
 
     def __mul__(self, other):
-        return self.operate(other, lambda a,b: a * b)
+        return self.operate(other, lambda a, b: a * b)
 
     def __rmul__(self, other):
-        return self.operate(other, lambda a,b: a * b)
+        return self.operate(other, lambda a, b: a * b)
 
     def __le__(self, other):
-        return self.operate(other, lambda a,b: a <= b)
+        return self.operate(other, lambda a, b: a <= b)
 
     def __lt__(self, other):
-        return self.operate(other, lambda a,b: a < b)
+        return self.operate(other, lambda a, b: a < b)
 
     def __ge__(self, other):
-        return self.operate(other, lambda a,b: a >= b)
+        return self.operate(other, lambda a, b: a >= b)
 
     def __gt__(self, other):
-        return self.operate(other, lambda a,b: a > b)
+        return self.operate(other, lambda a, b: a > b)
+
+    def __eq__(self, other):
+        return self.operate(other, lambda a, b: a == b)
+
+    def __ne__(self, other):
+        return self.operate(other, lambda a, b: a != b)
 
     def __len__(self):
         return len(self.probs)
+
+
+
+class Vase:
+    """
+    A collection of items that can be drawn to form a probability distribution.
+
+    A vase preserves repeated items and can model draws with or without
+    replacement, where the order of drawn items may optionally matter.
+    """
+
+    def __init__(self, contents):
+        """
+        Initialize a vase with the items it contains.
+
+        Parameters:
+            contents (list): Items available to draw from the vase
+        """
+        self._contents = contents
+
+    @classmethod
+    def from_counts(self, **kwargs):
+        """
+        Create a vase from item names and their quantities.
+
+        Parameters:
+            **kwargs (int): Item names mapped to the number of copies
+
+        Returns:
+            Vase: A vase containing the requested number of each item
+        """
+        contents = []
+        for k, v in kwargs.items():
+            contents.extend([k]*v)
+        return Vase(contents)
+
+    def _to_sorted_key(self, tup):
+        """
+        Convert a collection of items into an order-independent key.
+
+        Parameters:
+            tup (tuple): Items drawn from the vase
+
+        Returns:
+            str: The items sorted and joined into a single key
+        """
+        return "".join(sorted(tup))
+
+    def take(self, n=1, replace=False, ordered=False):
+        """
+        Calculate the distribution of drawing items from the vase.
+
+        Parameters:
+            n (int): Number of items to draw, default is 1
+            replace (bool): Whether drawn items are replaced, default is False
+            ordered (bool): Whether draw order affects outcomes, default is False
+
+        Returns:
+            Dice: The probability distribution over possible draws
+        """
+        if replace:
+            out = product(self._contents, repeat=n)
+        else:
+            out = permutations(self._contents, n)
+        out = [self._to_sorted_key(_) if not ordered else "".join(_) for _ in out]
+        return Dice(Counter(out))
+
+
+Vase.from_counts(a=3, b=3, c=1).take(2, replace=True, ordered=True)
+
 
 
 def p(expression):
@@ -212,7 +321,8 @@ def p(expression):
     Returns:
         float: The probability of the True outcome
     """
-    return expression.probs[True]
+    return expression.probs.get(True, 0)
+
 
 def exp(dice):
     """
@@ -226,6 +336,7 @@ def exp(dice):
     """
     return sum(i * p for i, p in dice.probs.items())
 
+
 def var(dice):
     """
     Calculates the variance of a dice.
@@ -236,7 +347,42 @@ def var(dice):
     Returns:
         float: The variance of the dice
     """
-    return sum(p * (i - exp(dice))**2 for i, p in dice.probs.items())
+    return sum(p * (i - exp(dice)) ** 2 for i, p in dice.probs.items())
+
+def mix(*dice, weights=None):
+    """
+    Create a weighted mixture of dice.
+
+    Parameters:
+        *dice: Dice objects to include in the mixture
+        weights: Optional non-negative weight for each dice
+
+    Returns:
+        Dice: A dice representing the weighted mixture
+    """
+    if not dice:
+        raise ValueError("mix requires at least one dice")
+    if not all(isinstance(die, Dice) for die in dice):
+        raise TypeError("mix expects Dice objects")
+
+    if weights is None:
+        weights = [1] * len(dice)
+    if len(weights) != len(dice):
+        raise ValueError("weights must contain one value for each dice")
+    if any(weight < 0 for weight in weights):
+        raise ValueError("weights must be non-negative")
+
+    total_weight = sum(weights)
+    if total_weight == 0:
+        raise ValueError("weights must have a positive sum")
+
+    new_probs = {}
+    for die, weight in zip(dice, weights):
+        for outcome, probability in die.probs.items():
+            contribution = probability * weight / total_weight
+            new_probs[outcome] = new_probs.get(outcome, 0) + contribution
+    return Dice(new_probs)
+
 
 def ordered(*dice_in):
     """

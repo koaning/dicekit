@@ -1,21 +1,29 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "altair==6.2.1",
+#     "marimo>=0.23.9",
+#     "pandas==3.0.3",
+# ]
+# ///
+
 import marimo
 
-__generated_with = "0.15.0"
+__generated_with = "0.23.9"
 app = marimo.App(width="medium")
 
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(
-        """
+    mo.md("""
     # `dicekit`
 
-    The goal of `dicekit` is two-fold. 
+    The goal of `dicekit` is two-fold.
 
     - The first is to offer a simple library to interact with dice.
     - The second is to explore how Marimo may give us a domain specific environment to work/develop with dice. We could just work on a domain specific languge, but what if we can adapt the environment around the language a bit more so that it promotes interactivity and curiosity a bit more?
 
-    ## `Dice` objects 
+    ## `Dice` objects
 
     The main object that you will interact with is the `Dice` object.
 
@@ -24,8 +32,7 @@ def _(mo):
     ```
 
     These objects give you a flexible way to declare dice, and they also come with a convient visualisation of the probability distribution that they represent.
-    """
-    )
+    """)
     return
 
 
@@ -37,7 +44,9 @@ def _(Dice):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md("""These dice can be stored into variables, but they can also be added/subtracted as if they were normal Python numbers.""")
+    mo.md("""
+    These dice can be stored into variables, but they can also be added/subtracted as if they were normal Python numbers.
+    """)
     return
 
 
@@ -52,7 +61,9 @@ def _(Dice):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md("""These dice have a bunch of utilities attached that make it easy to get the distribution that you are interested in. For example, what if you are interested in the maximum of two dice rolls? You can use the `.out_of` method for that.""")
+    mo.md("""
+    These dice have a bunch of utilities attached that make it easy to get the distribution that you are interested in. For example, what if you are interested in the maximum of two dice rolls? You can use the `.out_of` method for that.
+    """)
     return
 
 
@@ -65,25 +76,25 @@ def _(mo):
 
 @app.cell
 def _(Dice, mo, sides_slider):
-    mo.hstack([
-        Dice.from_sides(sides_slider.value), 
-        Dice.from_sides(sides_slider.value).out_of(2, max),
-        Dice.from_sides(sides_slider.value).out_of(3, max),
-    ])
+    mo.hstack(
+        [
+            Dice.from_sides(sides_slider.value),
+            Dice.from_sides(sides_slider.value).out_of(2, max),
+            Dice.from_sides(sides_slider.value).out_of(3, max),
+        ]
+    )
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(
-        """
+    mo.md("""
     When you have dice, you're typically also interested in their probabilities. You can use comparison operators for this, and we also have a convience function to give you the probability that you're interested in.
 
     ```python
     from dicekit import p, exp, var
     ```
-    """
-    )
+    """)
     return
 
 
@@ -98,7 +109,9 @@ def _(Dice, p):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(r"""Under the hood, a comparison operator merely generates another `Dice`.""")
+    mo.md(r"""
+    Under the hood, a comparison operator merely generates another `Dice`.
+    """)
     return
 
 
@@ -110,7 +123,9 @@ def _(d20):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(r"""There are also some other convenience functions available such as `exp` and `var`.""")
+    mo.md(r"""
+    There are also some other convenience functions available such as `exp` and `var`.
+    """)
     return
 
 
@@ -122,19 +137,17 @@ def _(d6, exp, var):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## Order Statistics
 
-    The library also comes with an `ordered` function that lets you calculate order statistics from a set of dice. 
+    The library also comes with an `ordered` function that lets you calculate order statistics from a set of dice.
 
-    ```python 
+    ```python
     from dicekit import ordered
     ```
 
     In the example below we explore a situation from the Risk boardgame. There are three attacking armies and two defending ones.
-    """
-    )
+    """)
     return
 
 
@@ -149,7 +162,9 @@ def _(d6, mo, ordered):
 
 @app.cell(hide_code=True)
 def _(a1, a2, d1, d2, mo, p):
-    mo.md(f"""The probability that the best attacking army defeats the defending army is {p(a1 > d1):.3f}. But the second best attacking army has a bigger chance: {p(a2 > d2):.3f}. These numbers are confirmed with the simulation below.""")
+    mo.md(f"""
+    The probability that the best attacking army defeats the defending army is {p(a1 > d1):.3f}. But the second best attacking army has a bigger chance: {p(a2 > d2):.3f}. These numbers are confirmed with the simulation below.
+    """)
     return
 
 
@@ -162,15 +177,17 @@ def _(a1, d6):
 @app.cell
 def _(random):
     # Simulation, just in case to check. This is not part of the library.
-    from statistics import mean 
+    from statistics import mean
+
 
     def simulate(n=10_000):
         results = []
         for _ in range(n):
-            a1, a2, a3 = sorted([random.randint(1,6) for _ in range(3)], reverse=True)
-            d1, d2 = sorted([random.randint(1,6) for _ in range(2)], reverse=True)
+            a1, a2, a3 = sorted([random.randint(1, 6) for _ in range(3)], reverse=True)
+            d1, d2 = sorted([random.randint(1, 6) for _ in range(2)], reverse=True)
             results.append((a1 > d1, a2 > d2))
         return mean([_[0] for _ in results]), mean([_[1] for _ in results])
+
 
     simulate()
     return
@@ -178,29 +195,29 @@ def _(random):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(
-        r"""
-    ## Implementation 
+    mo.md(r"""
+    ## Implementation
 
-    Fun fact: this library is completely defined and maintained from a Marimo notebook! The convenience here is that I can glance at the notebook to confirm if it is working and it also reinforces a good documentation practice. Feel free to explore [the repository](https://github.com/koaning/dicekit) to learn out it is set up. 
+    Fun fact: this library is completely defined and maintained from a Marimo notebook! The convenience here is that I can glance at the notebook to confirm if it is working and it also reinforces a good documentation practice. Feel free to explore [the repository](https://github.com/koaning/dicekit) to learn out it is set up.
 
     You can also inspect the full implementation below.
-    """
-    )
+    """)
     return
 
 
 @app.cell
 def _():
-    ## Export 
+    ## Export
 
-    import altair as alt 
+    import altair as alt
     import pandas as pd
     import marimo as mo
-    import random 
+    import random
+    from collections.abc import Mapping
     from collections import Counter
-    from itertools import product
+    from itertools import product, combinations, permutations, combinations_with_replacement
     from functools import reduce
+
 
     class Dice:
         """
@@ -217,7 +234,7 @@ def _():
             Parameters:
                 probs (dict): A dictionary mapping face values to probabilities
             """
-            self.probs = probs
+            self.probs = {k: v / sum(probs.values()) for k, v in probs.items()}
 
         @classmethod
         def from_sides(cls, n=6):
@@ -230,7 +247,7 @@ def _():
             Returns:
                 Dice: A fair dice with n sides
             """
-            return cls({i: 1/n for i in range(1, n+1)})
+            return cls({i: 1 / n for i in range(1, n + 1)})
 
         @classmethod
         def from_numbers(cls, *args):
@@ -244,7 +261,7 @@ def _():
                 Dice: A dice with probabilities based on the frequency of each number
             """
             c = Counter(args)
-            return cls({k: v/len(args) for k, v in args.items()})
+            return cls({k: v / len(args) for k, v in args.items()})
 
         def roll(self, n=1):
             """
@@ -258,6 +275,35 @@ def _():
             """
             return random.choices(list(self.probs.keys()), weights=list(self.probs.values()), k=n)
 
+        def sample(self, n=1):
+            """
+            Simulate rolling the dice n times.
+
+            Parameters:
+                n (int): Number of rolls, default is 1
+
+            Returns:
+                list: Results of the dice rolls
+            """
+            return self.roll(n=1)
+
+        def map(self, transform):
+            """
+            Transform the outcomes of the dice.
+
+            Parameters:
+                transform: A callable or mapping from old outcomes to new outcomes
+
+            Returns:
+                Dice: A dice containing the transformed outcomes
+            """
+            func = transform.__getitem__ if isinstance(transform, Mapping) else transform
+            new_probs = {}
+            for outcome, probability in self.probs.items():
+                new_outcome = func(outcome)
+                new_probs[new_outcome] = new_probs.get(new_outcome, 0) + probability
+            return Dice(new_probs)
+
         def operate(self, other, operator):
             """
             Apply an operation between this dice and another dice or number.
@@ -269,8 +315,11 @@ def _():
             Returns:
                 Dice: A new dice representing the distribution of the operation's results
             """
-            if isinstance(other, (float, int)):
-                other = Dice({other: 1})
+            if not isinstance(other, Dice):
+                try:
+                    other = Dice({other: 1})
+                except TypeError as exc:
+                    raise TypeError("operations require a Dice or hashable value") from exc
             new_probs = {}
             for s1, p1 in self.probs.items():
                 for s2, p2 in other.probs.items():
@@ -292,7 +341,7 @@ def _():
             """
             new_probs = {k: v for k, v in self.probs.items() if func(k)}
             total_prob = sum(new_probs.values())
-            return Dice({k: v/total_prob for k, v in new_probs.items()})
+            return Dice({k: v / total_prob for k, v in new_probs.items()})
 
         def _repr_html_(self):
             """
@@ -313,17 +362,16 @@ def _():
             df = pd.DataFrame([{"i": k, "p": v} for k, v in self.probs.items()])
             return (
                 alt.Chart(df)
-                  .mark_bar()
-                  .encode(
-                    x="i", 
+                .mark_bar()
+                .encode(
+                    x="i",
                     y="p",
                     tooltip=[
                         alt.Tooltip("i", title="Value"),
-                        alt.Tooltip("p", title="Probability", format=".3f")
-                    ]
-                  )
-                  .properties(title="Dice with probabilities:", width=120, height=120)
-                  .interactive()
+                        alt.Tooltip("p", title="Probability", format=".3f"),
+                    ],
+                )
+                .properties(title="Dice with probabilities:", width=120, height=120)
             )
 
         def ordered(self, n, k=None):
@@ -363,43 +411,133 @@ def _():
             return Dice(result)
 
         def __add__(self, other):
-            return self.operate(other, lambda a,b: a + b)
+            return self.operate(other, lambda a, b: a + b)
 
         def __radd__(self, other):
-            return self.operate(other, lambda a,b: a + b)
+            return self.operate(other, lambda a, b: a + b)
 
         def __sub__(self, other):
-            return self.operate(other, lambda a,b: a - b)
+            return self.operate(other, lambda a, b: a - b)
 
         def __rsub__(self, other):
-            return self.operate(other, lambda a,b: b - a)
+            return self.operate(other, lambda a, b: b - a)
 
         def __mul__(self, other):
-            return self.operate(other, lambda a,b: a * b)
+            return self.operate(other, lambda a, b: a * b)
 
         def __rmul__(self, other):
-            return self.operate(other, lambda a,b: a * b)
+            return self.operate(other, lambda a, b: a * b)
 
         def __le__(self, other):
-            return self.operate(other, lambda a,b: a <= b)
+            return self.operate(other, lambda a, b: a <= b)
 
         def __lt__(self, other):
-            return self.operate(other, lambda a,b: a < b)
+            return self.operate(other, lambda a, b: a < b)
 
         def __ge__(self, other):
-            return self.operate(other, lambda a,b: a >= b)
+            return self.operate(other, lambda a, b: a >= b)
 
         def __gt__(self, other):
-            return self.operate(other, lambda a,b: a > b)
+            return self.operate(other, lambda a, b: a > b)
+
+        def __eq__(self, other):
+            return self.operate(other, lambda a, b: a == b)
+
+        def __ne__(self, other):
+            return self.operate(other, lambda a, b: a != b)
 
         def __len__(self):
             return len(self.probs)
-    return Dice, mo, product, random, reduce
+
+    return Counter, Dice, mo, permutations, product, random, reduce
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    We also offer a utility class called a `Vase` to mimic situations when you're trying to grab items from a bag and you'd like to know things related to how likely it is to grab combinations of items.
+    """)
+    return
+
+
+@app.cell
+def _(Counter, Dice, permutations, product):
+    ## Export
+
+
+    class Vase:
+        """
+        A collection of items that can be drawn to form a probability distribution.
+
+        A vase preserves repeated items and can model draws with or without
+        replacement, where the order of drawn items may optionally matter.
+        """
+
+        def __init__(self, contents):
+            """
+            Initialize a vase with the items it contains.
+
+            Parameters:
+                contents (list): Items available to draw from the vase
+            """
+            self._contents = contents
+
+        @classmethod
+        def from_counts(self, **kwargs):
+            """
+            Create a vase from item names and their quantities.
+
+            Parameters:
+                **kwargs (int): Item names mapped to the number of copies
+
+            Returns:
+                Vase: A vase containing the requested number of each item
+            """
+            contents = []
+            for k, v in kwargs.items():
+                contents.extend([k]*v)
+            return Vase(contents)
+
+        def _to_sorted_key(self, tup):
+            """
+            Convert a collection of items into an order-independent key.
+
+            Parameters:
+                tup (tuple): Items drawn from the vase
+
+            Returns:
+                str: The items sorted and joined into a single key
+            """
+            return "".join(sorted(tup))
+
+        def take(self, n=1, replace=False, ordered=False):
+            """
+            Calculate the distribution of drawing items from the vase.
+
+            Parameters:
+                n (int): Number of items to draw, default is 1
+                replace (bool): Whether drawn items are replaced, default is False
+                ordered (bool): Whether draw order affects outcomes, default is False
+
+            Returns:
+                Dice: The probability distribution over possible draws
+            """
+            if replace:
+                out = product(self._contents, repeat=n)
+            else:
+                out = permutations(self._contents, n)
+            out = [self._to_sorted_key(_) if not ordered else "".join(_) for _ in out]
+            return Dice(Counter(out))
+
+
+    Vase.from_counts(a=3, b=3, c=1).take(2, replace=True, ordered=True)
+    return
 
 
 @app.cell
 def _(Dice, product, reduce):
     ## Export
+
 
     def p(expression):
         """
@@ -411,7 +549,8 @@ def _(Dice, product, reduce):
         Returns:
             float: The probability of the True outcome
         """
-        return expression.probs[True]
+        return expression.probs.get(True, 0)
+
 
     def exp(dice):
         """
@@ -425,6 +564,7 @@ def _(Dice, product, reduce):
         """
         return sum(i * p for i, p in dice.probs.items())
 
+
     def var(dice):
         """
         Calculates the variance of a dice.
@@ -435,7 +575,42 @@ def _(Dice, product, reduce):
         Returns:
             float: The variance of the dice
         """
-        return sum(p * (i - exp(dice))**2 for i, p in dice.probs.items())
+        return sum(p * (i - exp(dice)) ** 2 for i, p in dice.probs.items())
+
+    def mix(*dice, weights=None):
+        """
+        Create a weighted mixture of dice.
+
+        Parameters:
+            *dice: Dice objects to include in the mixture
+            weights: Optional non-negative weight for each dice
+
+        Returns:
+            Dice: A dice representing the weighted mixture
+        """
+        if not dice:
+            raise ValueError("mix requires at least one dice")
+        if not all(isinstance(die, Dice) for die in dice):
+            raise TypeError("mix expects Dice objects")
+
+        if weights is None:
+            weights = [1] * len(dice)
+        if len(weights) != len(dice):
+            raise ValueError("weights must contain one value for each dice")
+        if any(weight < 0 for weight in weights):
+            raise ValueError("weights must be non-negative")
+
+        total_weight = sum(weights)
+        if total_weight == 0:
+            raise ValueError("weights must have a positive sum")
+
+        new_probs = {}
+        for die, weight in zip(dice, weights):
+            for outcome, probability in die.probs.items():
+                contribution = probability * weight / total_weight
+                new_probs[outcome] = new_probs.get(outcome, 0) + contribution
+        return Dice(new_probs)
+
 
     def ordered(*dice_in):
         """
@@ -467,6 +642,7 @@ def _(Dice, product, reduce):
                 new_dice[keys[_j]] += pval
             dice_out.append(Dice(new_dice))
         return dice_out
+
     return exp, ordered, p, var
 
 
