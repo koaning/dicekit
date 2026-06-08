@@ -3,10 +3,8 @@ build:
 	uvx marimo -y export html-wasm --mode edit -o docs nbs/__init__.py --force
 
 install:
-	python -m pip install uv
-	python -m pip install pytest
 	uv venv
-	uv pip install -e . marimo
+	uv pip install -e . marimo pytest
 
 uv-install:
 	uv pip install -e . marimo

@@ -7,6 +7,7 @@ build-backend = "setuptools.build_meta"
 name = "dicekit"
 version = "0.1.4"
 description="Domain specific environment for dice"
+requires-python = ">=3.10,<3.13"
 
 license = {file = "LICENSE"}
 readme = "README.md"
@@ -27,6 +28,11 @@ classifiers = [
 
 dependencies = [
     "altair", "pandas", "marimo"
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
 ]
 
 [project.urls]
