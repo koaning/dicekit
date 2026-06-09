@@ -96,6 +96,17 @@ def test_dice_matmul_scales_values():
     reflected = 2 @ d
     assert reflected.probs == scaled.probs
 
+def test_dice_mul_and_matmul_differ():
+    d6 = Dice.from_sides(6)
+
+    summed = d6 * 2
+    scaled = d6 @ 2
+
+    assert exp(summed) == pytest.approx(exp(scaled))
+    assert summed.probs[7] == pytest.approx(6 / 36)
+    assert 7 not in scaled.probs
+    assert scaled.probs[12] == pytest.approx(1 / 6)
+
 def test_dice_comparisons():
     d1 = Dice({1: 0.5, 2: 0.5})
     d2 = Dice({1: 0.5, 2: 0.5})
