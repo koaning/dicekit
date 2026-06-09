@@ -20,17 +20,21 @@ See `Makefile` and `.github/workflows/tests.yml` for the canonical workflow:
 | Install dev deps | `make install` |
 | Run tests | `make test` |
 | Rebuild lib + docs | `make build` |
-| Interactive notebook | `uv run marimo edit nbs/__init__.py --headless` |
+| Interactive notebook | `uvx marimo -y edit nbs/__init__.py --headless` |
 
 There is no dedicated linter in this repo; CI runs **pytest** only.
 
 ### Marimo notebook server
 
-When starting marimo on `nbs/__init__.py`, it may prompt:
+Use the global **`-y` / `--yes`** flag for non-interactive startup (same pattern as `make build`, which runs `uvx marimo -y export ...`):
 
-> Run in a sandboxed venv containing this notebook's dependencies? [Y/n]
+```bash
+uvx marimo -y edit nbs/__init__.py --headless
+```
 
-Answer **`n`** when dependencies are already installed via `make install` (non-interactive: pipe `printf 'n\n'` or send `n` in tmux). Default URL: **http://localhost:2718** (token appended to URL when `--token` is enabled).
+`-y` auto-accepts the sandbox prompt and starts the server without tmux keystrokes or piping answers. Default URL: **http://localhost:2718** (token appended when `--token` is enabled).
+
+**Note:** `uv run marimo -y edit ...` can fail here because the sandbox re-invokes the project marimo and hits a version conflict. Prefer **`uvx marimo -y edit`** instead.
 
 ### Static docs (optional)
 
