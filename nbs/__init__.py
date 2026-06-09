@@ -10,10 +10,10 @@
 import marimo
 
 __generated_with = "0.23.9"
-app = marimo.App(width="medium")
+app = marimo.App(width="columns")
 
 
-@app.cell(hide_code=True)
+@app.cell(column=0, hide_code=True)
 def _(mo):
     mo.md("""
     # `dicekit`
@@ -190,6 +190,32 @@ def _(random):
 
 
     simulate()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## `Vase` to `Dice`
+
+    We also offer a utility class called a `Vase` to mimic situations when you're trying to grab items from a bag and you'd like to know things related to how likely it is to grab combinations of items.
+    """)
+    return
+
+
+@app.cell
+def _(Vase):
+    Vase.from_counts(a=3, b=3, c=1).take(2, replace=True, ordered=True)
+    return
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell(column=1)
+def _():
     return
 
 
@@ -456,14 +482,6 @@ def _():
     return Counter, Dice, mo, permutations, product, random, reduce
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    We also offer a utility class called a `Vase` to mimic situations when you're trying to grab items from a bag and you'd like to know things related to how likely it is to grab combinations of items.
-    """)
-    return
-
-
 @app.cell
 def _(Counter, Dice, permutations, product):
     ## Export
@@ -533,9 +551,7 @@ def _(Counter, Dice, permutations, product):
             out = [self._to_sorted_key(_) if not ordered else "".join(_) for _ in out]
             return Dice(Counter(out))
 
-
-    Vase.from_counts(a=3, b=3, c=1).take(2, replace=True, ordered=True)
-    return
+    return (Vase,)
 
 
 @app.cell
