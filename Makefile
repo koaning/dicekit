@@ -1,6 +1,5 @@
 build:
 	uv run python nbs/build.py
-	uvx marimo -y export html-wasm --mode edit -o docs nbs/__init__.py --force
 
 install:
 	uv venv

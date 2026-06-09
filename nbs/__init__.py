@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "altair==6.2.1",
+#     "hastyplot==0.4.1",
 #     "marimo>=0.23.9",
 #     "pandas==3.0.3",
 # ]
@@ -57,6 +57,20 @@ def _(Dice):
 
     d6 + d8
     return (d6,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    By default a `Dice` renders the probability of each outcome via `.prob_chart()`. When you'd rather see the probability of rolling *at most* a given value, you can reach for the cumulative distribution function with `.cdf_chart()`.
+    """)
+    return
+
+
+@app.cell
+def _(d6):
+    (d6 + d6).cdf_chart()
+    return
 
 
 @app.cell(hide_code=True)
@@ -198,6 +212,10 @@ def _(mo):
     mo.md(r"""
     ## `Vase` to `Dice`
 
+    ```python
+    from dicekit import Vase
+    ```
+
     We also offer a utility class called a `Vase` to mimic situations when you're trying to grab items from a bag and you'd like to know things related to how likely it is to grab combinations of items.
     """)
     return
@@ -214,12 +232,7 @@ def _():
     return
 
 
-@app.cell(column=1)
-def _():
-    return
-
-
-@app.cell(hide_code=True)
+@app.cell(column=1, hide_code=True)
 def _(mo):
     mo.md(r"""
     ## Implementation
@@ -235,9 +248,9 @@ def _(mo):
 def _():
     ## Export
 
-    import altair as alt
     import pandas as pd
     import marimo as mo
+    from hastyplot import qplot
     import random
     from collections.abc import Mapping
     from collections import Counter
@@ -383,21 +396,44 @@ def _():
             Create a visualization of the dice probability distribution.
 
             Returns:
-                alt.Chart: An Altair chart showing the dice distribution
+                alt.Chart: An Altair chart showing the probability mass function
             """
             df = pd.DataFrame([{"i": k, "p": v} for k, v in self.probs.items()])
-            return (
-                alt.Chart(df)
-                .mark_bar()
-                .encode(
-                    x="i",
-                    y="p",
-                    tooltip=[
-                        alt.Tooltip("i", title="Value"),
-                        alt.Tooltip("p", title="Probability", format=".3f"),
-                    ],
-                )
-                .properties(title="Dice with probabilities:", width=120, height=120)
+            return qplot(
+                df,
+                "i",
+                "p",
+                mark="bar",
+                tooltip=["i", "p"],
+                title="Dice with probabilities:",
+                width=120,
+                height=120,
+                theme="default",
+            )
+
+        def cdf_chart(self):
+            """
+            Create a visualization of the cumulative distribution function.
+
+            Returns:
+                alt.Chart: An Altair step chart showing the cumulative probability
+            """
+            cumulative = 0
+            rows = []
+            for outcome, probability in sorted(self.probs.items()):
+                cumulative += probability
+                rows.append({"i": outcome, "p": cumulative})
+            df = pd.DataFrame(rows)
+            return qplot(
+                df,
+                "i",
+                "p",
+                mark="step",
+                tooltip=["i", "p"],
+                title="Cumulative distribution:",
+                width=120,
+                height=120,
+                theme="default",
             )
 
         def ordered(self, n, k=None):

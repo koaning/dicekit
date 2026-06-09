@@ -1,8 +1,8 @@
 
 
-import altair as alt
 import pandas as pd
 import marimo as mo
+from hastyplot import qplot
 import random
 from collections.abc import Mapping
 from collections import Counter
@@ -148,21 +148,44 @@ class Dice:
         Create a visualization of the dice probability distribution.
 
         Returns:
-            alt.Chart: An Altair chart showing the dice distribution
+            alt.Chart: An Altair chart showing the probability mass function
         """
         df = pd.DataFrame([{"i": k, "p": v} for k, v in self.probs.items()])
-        return (
-            alt.Chart(df)
-            .mark_bar()
-            .encode(
-                x="i",
-                y="p",
-                tooltip=[
-                    alt.Tooltip("i", title="Value"),
-                    alt.Tooltip("p", title="Probability", format=".3f"),
-                ],
-            )
-            .properties(title="Dice with probabilities:", width=120, height=120)
+        return qplot(
+            df,
+            "i",
+            "p",
+            mark="bar",
+            tooltip=["i", "p"],
+            title="Dice with probabilities:",
+            width=120,
+            height=120,
+            theme="default",
+        )
+
+    def cdf_chart(self):
+        """
+        Create a visualization of the cumulative distribution function.
+
+        Returns:
+            alt.Chart: An Altair step chart showing the cumulative probability
+        """
+        cumulative = 0
+        rows = []
+        for outcome, probability in sorted(self.probs.items()):
+            cumulative += probability
+            rows.append({"i": outcome, "p": cumulative})
+        df = pd.DataFrame(rows)
+        return qplot(
+            df,
+            "i",
+            "p",
+            mark="step",
+            tooltip=["i", "p"],
+            title="Cumulative distribution:",
+            width=120,
+            height=120,
+            theme="default",
         )
 
     def ordered(self, n, k=None):
@@ -243,75 +266,6 @@ class Dice:
 
     def __len__(self):
         return len(self.probs)
-
-
-
-class Vase:
-    """
-    A collection of items that can be drawn to form a probability distribution.
-
-    A vase preserves repeated items and can model draws with or without
-    replacement, where the order of drawn items may optionally matter.
-    """
-
-    def __init__(self, contents):
-        """
-        Initialize a vase with the items it contains.
-
-        Parameters:
-            contents (list): Items available to draw from the vase
-        """
-        self._contents = contents
-
-    @classmethod
-    def from_counts(self, **kwargs):
-        """
-        Create a vase from item names and their quantities.
-
-        Parameters:
-            **kwargs (int): Item names mapped to the number of copies
-
-        Returns:
-            Vase: A vase containing the requested number of each item
-        """
-        contents = []
-        for k, v in kwargs.items():
-            contents.extend([k]*v)
-        return Vase(contents)
-
-    def _to_sorted_key(self, tup):
-        """
-        Convert a collection of items into an order-independent key.
-
-        Parameters:
-            tup (tuple): Items drawn from the vase
-
-        Returns:
-            str: The items sorted and joined into a single key
-        """
-        return "".join(sorted(tup))
-
-    def take(self, n=1, replace=False, ordered=False):
-        """
-        Calculate the distribution of drawing items from the vase.
-
-        Parameters:
-            n (int): Number of items to draw, default is 1
-            replace (bool): Whether drawn items are replaced, default is False
-            ordered (bool): Whether draw order affects outcomes, default is False
-
-        Returns:
-            Dice: The probability distribution over possible draws
-        """
-        if replace:
-            out = product(self._contents, repeat=n)
-        else:
-            out = permutations(self._contents, n)
-        out = [self._to_sorted_key(_) if not ordered else "".join(_) for _ in out]
-        return Dice(Counter(out))
-
-
-Vase.from_counts(a=3, b=3, c=1).take(2, replace=True, ordered=True)
 
 
 
@@ -418,3 +372,69 @@ def ordered(*dice_in):
             new_dice[keys[_j]] += pval
         dice_out.append(Dice(new_dice))
     return dice_out
+
+
+
+class Vase:
+    """
+    A collection of items that can be drawn to form a probability distribution.
+
+    A vase preserves repeated items and can model draws with or without
+    replacement, where the order of drawn items may optionally matter.
+    """
+
+    def __init__(self, contents):
+        """
+        Initialize a vase with the items it contains.
+
+        Parameters:
+            contents (list): Items available to draw from the vase
+        """
+        self._contents = contents
+
+    @classmethod
+    def from_counts(self, **kwargs):
+        """
+        Create a vase from item names and their quantities.
+
+        Parameters:
+            **kwargs (int): Item names mapped to the number of copies
+
+        Returns:
+            Vase: A vase containing the requested number of each item
+        """
+        contents = []
+        for k, v in kwargs.items():
+            contents.extend([k]*v)
+        return Vase(contents)
+
+    def _to_sorted_key(self, tup):
+        """
+        Convert a collection of items into an order-independent key.
+
+        Parameters:
+            tup (tuple): Items drawn from the vase
+
+        Returns:
+            str: The items sorted and joined into a single key
+        """
+        return "".join(sorted(tup))
+
+    def take(self, n=1, replace=False, ordered=False):
+        """
+        Calculate the distribution of drawing items from the vase.
+
+        Parameters:
+            n (int): Number of items to draw, default is 1
+            replace (bool): Whether drawn items are replaced, default is False
+            ordered (bool): Whether draw order affects outcomes, default is False
+
+        Returns:
+            Dice: The probability distribution over possible draws
+        """
+        if replace:
+            out = product(self._contents, repeat=n)
+        else:
+            out = permutations(self._contents, n)
+        out = [self._to_sorted_key(_) if not ordered else "".join(_) for _ in out]
+        return Dice(Counter(out))
