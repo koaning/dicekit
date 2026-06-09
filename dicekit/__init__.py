@@ -205,6 +205,8 @@ class Dice:
         return self.operate(other, lambda a, b: a + b)
 
     def __radd__(self, other):
+        if other == 0:
+            return self
         return self.operate(other, lambda a, b: a + b)
 
     def __sub__(self, other):
