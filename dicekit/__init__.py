@@ -213,33 +213,16 @@ class Dice:
     def __rsub__(self, other):
         return self.operate(other, lambda a, b: b - a)
 
-    def _repeat_sum(self, count):
-        """
-        Roll this die `count` times and sum the results.
-
-        Parameters:
-            count (int): Number of dice to roll and sum
-
-        Returns:
-            Dice: Distribution of the summed rolls
-        """
-        if not isinstance(count, int) or isinstance(count, bool):
-            raise TypeError("dice multiplication by count requires an integer")
-        if count < 1:
-            raise ValueError("count must be at least 1")
-        result = self
-        for _ in range(count - 1):
-            result = result + self
-        return result
-
     def __mul__(self, other):
         if isinstance(other, int) and not isinstance(other, bool):
-            return self._repeat_sum(other)
+            if other < 1:
+                raise ValueError("count must be at least 1")
+            return reduce(lambda a, b: a + b, [self] * other)
         return self.operate(other, lambda a, b: a * b)
 
     def __rmul__(self, other):
         if isinstance(other, int) and not isinstance(other, bool):
-            return self._repeat_sum(other)
+            return self.__mul__(other)
         return self.operate(other, lambda a, b: a * b)
 
     def __matmul__(self, other):
