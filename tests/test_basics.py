@@ -75,6 +75,11 @@ def test_dice_sum():
         "ba": 0.25,
         "bb": 0.25,
     }
+    assert (labels + 0).probs == labels.probs
+    assert (0 + labels).probs == labels.probs
+
+    d_with_zero = Dice({0: 0.5, 1: 0.5})
+    assert sum([d_with_zero, d_with_zero]).probs == {0: 0.25, 1: 0.5, 2: 0.25}
 
 def test_dice_reflected_operations():
     d = Dice({1: 0.5, 2: 0.5})
