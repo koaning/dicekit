@@ -232,12 +232,7 @@ def _():
     return
 
 
-@app.cell(column=1)
-def _():
-    return
-
-
-@app.cell(hide_code=True)
+@app.cell(column=1, hide_code=True)
 def _(mo):
     mo.md(r"""
     ## Implementation
