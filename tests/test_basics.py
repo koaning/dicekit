@@ -72,9 +72,29 @@ def test_dice_reflected_operations():
     assert d_sub.probs[1] == 0.5
     assert d_sub.probs[0] == 0.5
 
-    d_mult = 2 * d
+    d_mult = 2 @ d
     assert d_mult.probs[2] == 0.5
     assert d_mult.probs[4] == 0.5
+
+def test_dice_mul_counts_rolls():
+    d6 = Dice.from_sides(6)
+
+    three_d6 = d6 * 3
+    assert abs(exp(three_d6) - exp(d6 + d6 + d6)) < 1e-10
+    assert abs(three_d6.probs[3] - (1 / 6) ** 3) < 1e-10
+
+    reflected = 3 * d6
+    assert abs(exp(reflected) - exp(three_d6)) < 1e-10
+
+def test_dice_matmul_scales_values():
+    d = Dice({1: 0.5, 2: 0.5})
+
+    scaled = d @ 2
+    assert scaled.probs[2] == 0.5
+    assert scaled.probs[4] == 0.5
+
+    reflected = 2 @ d
+    assert reflected.probs == scaled.probs
 
 def test_dice_comparisons():
     d1 = Dice({1: 0.5, 2: 0.5})
