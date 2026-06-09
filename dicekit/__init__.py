@@ -202,9 +202,13 @@ class Dice:
         return Dice(result)
 
     def __add__(self, other):
+        if not isinstance(other, Dice) and other == 0:
+            return self
         return self.operate(other, lambda a, b: a + b)
 
     def __radd__(self, other):
+        if not isinstance(other, Dice) and other == 0:
+            return self
         return self.operate(other, lambda a, b: a + b)
 
     def __sub__(self, other):

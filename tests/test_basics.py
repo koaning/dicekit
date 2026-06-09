@@ -61,6 +61,26 @@ def test_dice_mix_validates_arguments():
     with pytest.raises(ValueError, match="at least one"):
         mix()
 
+def test_dice_sum():
+    d6 = Dice.from_sides(6)
+    three_d6 = sum([d6, d6, d6])
+    assert three_d6.probs[10] == pytest.approx(27 / 216)
+    assert three_d6.probs[3] == pytest.approx(1 / 216)
+    assert sum([d6]).probs == d6.probs
+
+    labels = Dice({"a": 0.5, "b": 0.5})
+    assert sum([labels, labels]).probs == {
+        "aa": 0.25,
+        "ab": 0.25,
+        "ba": 0.25,
+        "bb": 0.25,
+    }
+    assert (labels + 0).probs == labels.probs
+    assert (0 + labels).probs == labels.probs
+
+    d_with_zero = Dice({0: 0.5, 1: 0.5})
+    assert sum([d_with_zero, d_with_zero]).probs == {0: 0.25, 1: 0.5, 2: 0.25}
+
 def test_dice_reflected_operations():
     d = Dice({1: 0.5, 2: 0.5})
 
