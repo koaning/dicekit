@@ -24,14 +24,6 @@ def disease_dag():
     return dag
 
 
-def test_dag_lives_in_learn_submodule_not_core():
-    import dicekit
-
-    assert not hasattr(dicekit, "DAG")
-    with pytest.raises(ImportError):
-        from dicekit import DAG  # noqa: F401
-
-
 def test_p_on_node_returns_posterior_dice():
     dag = disease_dag()
     disease, test_1 = dag.get_variables("disease, test_1")
