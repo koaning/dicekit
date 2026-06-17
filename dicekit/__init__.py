@@ -199,7 +199,7 @@ class Dice:
         """
         items = [self] * n
         if k:
-            return ordered(*items)[:k]
+            return ordered(*items, k=k)
         return ordered(*items)
 
     def out_of(self, n=2, func=max):
@@ -342,7 +342,29 @@ def mix(*dice, weights=None):
     return Dice(new_probs)
 
 
-def ordered(*dice_in):
+def _slice_limit(length, stop):
+    return len(range(length)[:stop])
+
+
+def _threshold_probabilities(die, thresholds):
+    """
+    Return P(die >= threshold) for each threshold.
+    """
+    probabilities = {}
+    cumulative = 0
+    items = sorted(die.probs.items(), reverse=True)
+    item_index = 0
+
+    for threshold in thresholds:
+        while item_index < len(items) and items[item_index][0] >= threshold:
+            cumulative += items[item_index][1]
+            item_index += 1
+        probabilities[threshold] = cumulative
+
+    return probabilities
+
+
+def ordered(*dice_in, k=None):
     """
     Return dice that represent order statistics. Highest first.
 
@@ -355,23 +377,62 @@ def ordered(*dice_in):
     Returns:
         list: A list of Dice objects representing order statistics
     """
-    result = {}
-    for _i in product(*[d.probs.items() for d in dice_in]):
-        eyes = tuple(sorted([_[0] for _ in _i], reverse=True))
-        prob = reduce(lambda a, b: a * b, [_[1] for _ in _i])
-        if eyes not in result:
-            result[eyes] = 0
-        result[eyes] += prob
+    if not dice_in:
+        return []
 
-    dice_out = []
-    for _j in range(len(dice_in)):
-        new_dice = {}
-        for keys, pval in result.items():
-            if keys[_j] not in new_dice:
-                new_dice[keys[_j]] = 0
-            new_dice[keys[_j]] += pval
-        dice_out.append(Dice(new_dice))
-    return dice_out
+    n_dice = len(dice_in)
+    n_outputs = n_dice if k is None else _slice_limit(n_dice, k)
+    if n_outputs == 0:
+        return []
+
+    thresholds = sorted(
+        {outcome for die in dice_in for outcome in die.probs},
+        reverse=True,
+    )
+    probabilities = [
+        _threshold_probabilities(die, thresholds)
+        for die in dice_in
+    ]
+
+    dice_out = [{} for _ in range(n_outputs)]
+    higher_threshold_survival = [0] * (n_outputs + 1)
+
+    for threshold in thresholds:
+        pass_count_probs = [1] + [0] * n_outputs
+
+        for probability in probabilities:
+            p_ge = probability[threshold]
+            p_lt = 1 - p_ge
+            new_pass_count_probs = [0] * (n_outputs + 1)
+
+            for pass_count, pass_count_probability in enumerate(pass_count_probs):
+                if pass_count_probability == 0:
+                    continue
+                new_pass_count_probs[pass_count] += pass_count_probability * p_lt
+                capped_pass_count = min(pass_count + 1, n_outputs)
+                new_pass_count_probs[capped_pass_count] += (
+                    pass_count_probability * p_ge
+                )
+
+            pass_count_probs = new_pass_count_probs
+
+        survival = [0] * (n_outputs + 1)
+        running = 0
+        for pass_count in range(n_outputs, -1, -1):
+            running += pass_count_probs[pass_count]
+            survival[pass_count] = running
+
+        for order_index in range(n_outputs):
+            order = order_index + 1
+            probability = survival[order] - higher_threshold_survival[order]
+            if probability < 0 and abs(probability) < 1e-15:
+                probability = 0
+            if probability != 0:
+                dice_out[order_index][threshold] = probability
+
+        higher_threshold_survival = survival
+
+    return [Dice(probs) for probs in dice_out]
 
 
 

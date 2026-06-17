@@ -1,5 +1,47 @@
 import pytest
+from itertools import product
 from dicekit import Dice, Vase, p, exp, mix, var, ordered
+
+
+def brute_force_ordered(*dice_in):
+    dice_out = [{} for _ in dice_in]
+    for combo in product(*[die.probs.items() for die in dice_in]):
+        outcomes = sorted([outcome for outcome, _ in combo], reverse=True)
+        probability = 1
+        for _, outcome_probability in combo:
+            probability *= outcome_probability
+        for index, outcome in enumerate(outcomes):
+            dice_out[index][outcome] = dice_out[index].get(outcome, 0) + probability
+    return [Dice(probs) for probs in dice_out]
+
+
+def old_method_ordered(*dice_in):
+    result = {}
+    for combo in product(*[die.probs.items() for die in dice_in]):
+        eyes = tuple(sorted([outcome for outcome, _ in combo], reverse=True))
+        probability = 1
+        for _, outcome_probability in combo:
+            probability *= outcome_probability
+        result[eyes] = result.get(eyes, 0) + probability
+
+    dice_out = []
+    for index in range(len(dice_in)):
+        new_dice = {}
+        for keys, probability in result.items():
+            new_dice[keys[index]] = new_dice.get(keys[index], 0) + probability
+        dice_out.append(Dice(new_dice))
+    return dice_out
+
+
+def assert_dice_probs_close(actual, expected):
+    assert len(actual) == len(expected)
+    for actual_dice, expected_dice in zip(actual, expected):
+        keys = set(actual_dice.probs) | set(expected_dice.probs)
+        for key in keys:
+            assert actual_dice.probs.get(key, 0) == pytest.approx(
+                expected_dice.probs.get(key, 0)
+            )
+
 
 def test_dice_creation():
     # Test basic dice creation
@@ -146,7 +188,7 @@ def test_dice_roll():
 def test_dice_ordered_2():
     d6 = Dice.from_sides(6)
     a1, a2 = ordered(d6, d6)
-    assert a1.probs[1] == 1/6/6
+    assert a1.probs[1] == pytest.approx(1/6/6)
     for k, v in a1.probs.items():
         assert abs(v - d6.out_of(2, max).probs[k]) < 1e-10
     for k, v in a2.probs.items():
@@ -155,7 +197,7 @@ def test_dice_ordered_2():
 def test_dice_ordered_method():
     d6 = Dice.from_sides(6)
     a1, a2 = d6.ordered(2)
-    assert a1.probs[1] == 1/6/6
+    assert a1.probs[1] == pytest.approx(1/6/6)
     for k, v in a1.probs.items():
         assert abs(v - d6.out_of(2, max).probs[k]) < 1e-10
     for k, v in a2.probs.items():
@@ -165,6 +207,15 @@ def test_dice_ordered_method():
     for k, v in highest.probs.items():
         assert abs(v - d6.out_of(2, max).probs[k]) < 1e-10
 
+def test_dice_ordered_method_limits_work_to_k_results():
+    d6 = Dice.from_sides(6)
+
+    first_two = d6.ordered(5, k=2)
+    all_ordered = d6.ordered(5)
+
+    assert len(first_two) == 2
+    assert_dice_probs_close(first_two, all_ordered[:2])
+
 def test_dice_ordered_3():
     d6 = Dice.from_sides(6)
     a1, _, a3 = ordered(d6, d6, d6)
@@ -173,3 +224,44 @@ def test_dice_ordered_3():
         assert abs(v - d6.out_of(3, max).probs[k]) < 1e-8
     for k, v in a3.probs.items():
         assert abs(v - d6.out_of(3, min).probs[k]) < 1e-8
+
+def test_dice_ordered_mixed_dice_matches_brute_force():
+    dice = [
+        Dice.from_sides(4),
+        Dice.from_sides(6),
+        Dice({1: 0.1, 5: 0.2, 9: 0.7}),
+    ]
+
+    assert_dice_probs_close(ordered(*dice), brute_force_ordered(*dice))
+
+def test_dice_ordered_mixed_dice_matches_old_method():
+    dice = [
+        Dice.from_sides(4),
+        Dice.from_sides(6),
+        Dice({1: 0.1, 5: 0.2, 9: 0.7}),
+        Dice({0: 2, 4: 1}),
+    ]
+
+    assert_dice_probs_close(ordered(*dice), old_method_ordered(*dice))
+
+def test_dice_ordered_sparse_faces_matches_brute_force():
+    dice = [
+        Dice({1: 1, 3: 2, 10: 1}),
+        Dice({3: 1, 10: 1}),
+        Dice({1: 4, 10: 1}),
+    ]
+
+    assert_dice_probs_close(ordered(*dice), brute_force_ordered(*dice))
+
+def test_dice_ordered_k_matches_prefix():
+    dice = [
+        Dice.from_sides(4),
+        Dice.from_sides(6),
+        Dice({1: 0.1, 5: 0.2, 9: 0.7}),
+    ]
+
+    first_two = ordered(*dice, k=2)
+    all_ordered = ordered(*dice)
+
+    assert len(first_two) == 2
+    assert_dice_probs_close(first_two, all_ordered[:2])
