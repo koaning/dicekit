@@ -9,25 +9,43 @@ on:
     - main
 
 jobs:
-  build:
-    if: ${{ always() }}
+  test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.12"]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: Install uv
-      uses: astral-sh/setup-uv@v2
-    - name: Set up Python ${{ matrix.python-version }}
-      run: uv python install ${{ matrix.python-version }}
-    - name: Install Venv
-      run: uv venv --python ${{ matrix.python-version }}
-    - name: Source
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+        python-version: ${{ matrix.python-version }}
+    - name: Install project
+      run: uv sync --group dev
+    - name: Run tests
+      run: uv run pytest
+    - name: Run type checks
+      run: uv run basedpyright dicekit
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+        python-version: "3.12"
+    - name: Install project
+      run: uv sync --group dev
+    - name: Rebuild package from notebook
+      run: uv run python nbs/build.py
+    - name: Check dicekit/__init__.py is up to date
       run: |
-        source .venv/bin/activate
-        which python
-        python --version
-        uv pip install -e . pytest
-        uv run pytest
+        if ! git diff --exit-code -- dicekit/__init__.py; then
+          echo "::error::dicekit/__init__.py is out of sync with nbs/__init__.py. Run 'make build' and commit the result."
+          exit 1
+        fi

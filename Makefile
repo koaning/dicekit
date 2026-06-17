@@ -1,6 +1,5 @@
 build:
 	uv run python nbs/build.py
-	uvx marimo -y export html-wasm --mode edit -o docs nbs/__init__.py --force
 
 install:
 	uv venv
@@ -15,6 +14,9 @@ pypi: clean test
 
 test:
 	uv run pytest
+
+typecheck:
+	uv run basedpyright dicekit
 
 clean:
 	rm -rf dist nbs/__pycache__ dicekit/__pycache__

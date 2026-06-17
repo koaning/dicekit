@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dicekit"
-version = "0.1.4"
+version = "0.2.2"
 description="Domain specific environment for dice"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.12,<3.13"
 
 license = {file = "LICENSE"}
 readme = "README.md"
@@ -17,8 +17,6 @@ authors = [
 
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
     "Topic :: Scientific/Engineering",
@@ -27,11 +25,12 @@ classifiers = [
 ]
 
 dependencies = [
-    "altair", "pandas", "marimo"
+    "hastyplot", "pandas", "marimo"
 ]
 
 [dependency-groups]
 dev = [
+    "basedpyright",
     "pytest",
 ]
 
@@ -48,3 +47,15 @@ exclude = [
     "notebooks",
     "tests",
 ]
+
+[tool.setuptools.package-data]
+dicekit = ["py.typed"]
+
+[tool.basedpyright]
+include = ["dicekit"]
+exclude = ["nbs"]
+reportMissingTypeStubs = false
+typeCheckingMode = "basic"
+
+[tool.marimo.language_servers.basedpyright]
+enabled = true

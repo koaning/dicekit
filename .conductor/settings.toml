@@ -1,0 +1,18 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+# Install deps + dev tools (pytest, basedpyright) into a per-workspace .venv
+# from uv.lock, and install dicekit editable. Matches the repo's uv workflow.
+setup = "uv sync"
+
+# Launch the marimo server on the nbs/ notebook folder. Each workspace gets its
+# own port, and --headless keeps it non-interactive (no browser launch).
+run = "uv run marimo edit nbs --headless --port $CONDUCTOR_PORT"
+
+# Tidy generated build artifacts (dist/, __pycache__) before archiving.
+# Workspace-local and non-destructive.
+archive = "make clean"
+
+# Each workspace binds marimo to its own CONDUCTOR_PORT with no shared local
+# state, so several workspaces can run at once.
+run_mode = "concurrent"
