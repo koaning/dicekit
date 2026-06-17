@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dicekit"
-version = "0.2.1"
+version = "0.2.2"
 description="Domain specific environment for dice"
 requires-python = ">=3.12,<3.13"
 
@@ -30,6 +30,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "basedpyright",
     "pytest",
 ]
 
@@ -46,3 +47,15 @@ exclude = [
     "notebooks",
     "tests",
 ]
+
+[tool.setuptools.package-data]
+dicekit = ["py.typed"]
+
+[tool.basedpyright]
+include = ["dicekit"]
+exclude = ["nbs"]
+reportMissingTypeStubs = false
+typeCheckingMode = "basic"
+
+[tool.marimo.language_servers.basedpyright]
+enabled = true
