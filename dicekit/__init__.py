@@ -1,3 +1,4 @@
+__all__ = ['Weight', 'Dice', 'Vase', 'p', 'exp', 'var', 'mix', 'ordered']
 
 
 import pandas as pd
@@ -5,10 +6,12 @@ import marimo as mo
 from hastyplot import qplot
 import random
 from collections.abc import Callable, Hashable, Mapping, Sequence
-from collections import Counter
+from collections import Counter, defaultdict
+from dataclasses import dataclass
 from itertools import product, permutations
 from functools import reduce
 from fractions import Fraction
+from operator import mul
 from typing import Any, Self, TypeAlias, cast
 
 # Probability weights may be exact (Fraction) or inexact (int/float). Fraction
@@ -360,8 +363,6 @@ class Dice[T: Hashable]:
     def __len__(self) -> int:
         return len(self.probs)
 
-
-
 class Vase:
     """
     A collection of items that can be drawn to form a probability distribution.
@@ -426,18 +427,23 @@ class Vase:
         out = [self._to_sorted_key(_) if not ordered else "".join(_) for _ in out]
         return Dice(Counter(out))
 
+from functools import singledispatch
 
 
-def p(expression: "Dice[bool]") -> Weight:
+@singledispatch
+def p(expression: object, given: object = None) -> Any:
     """
-    Returns the probability of a True outcome from a dice expression.
+    Evaluate a probability expression.
 
-    Parameters:
-        expression: A Dice object representing a boolean comparison
-
-    Returns:
-        The probability of the True outcome (a Fraction when the dice is exact)
+    For a boolean Dice this returns P(True). The DAG layer in
+    ``dicekit.learn`` registers handlers for its node and event types,
+    so importing that module teaches ``p`` to query a DAG.
     """
+    raise TypeError("p expects a Dice, DAG node, or DAG event")
+
+
+@p.register(Dice)
+def _p_dice(expression: "Dice[Any]", given: object = None) -> Any:
     return expression.probs.get(True, 0)
 
 
