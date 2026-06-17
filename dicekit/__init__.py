@@ -269,6 +269,72 @@ class Dice:
 
 
 
+class Vase:
+    """
+    A collection of items that can be drawn to form a probability distribution.
+
+    A vase preserves repeated items and can model draws with or without
+    replacement, where the order of drawn items may optionally matter.
+    """
+
+    def __init__(self, contents):
+        """
+        Initialize a vase with the items it contains.
+
+        Parameters:
+            contents (list): Items available to draw from the vase
+        """
+        self._contents = contents
+
+    @classmethod
+    def from_counts(self, **kwargs):
+        """
+        Create a vase from item names and their quantities.
+
+        Parameters:
+            **kwargs (int): Item names mapped to the number of copies
+
+        Returns:
+            Vase: A vase containing the requested number of each item
+        """
+        contents = []
+        for k, v in kwargs.items():
+            contents.extend([k]*v)
+        return Vase(contents)
+
+    def _to_sorted_key(self, tup):
+        """
+        Convert a collection of items into an order-independent key.
+
+        Parameters:
+            tup (tuple): Items drawn from the vase
+
+        Returns:
+            str: The items sorted and joined into a single key
+        """
+        return "".join(sorted(tup))
+
+    def take(self, n=1, replace=False, ordered=False):
+        """
+        Calculate the distribution of drawing items from the vase.
+
+        Parameters:
+            n (int): Number of items to draw, default is 1
+            replace (bool): Whether drawn items are replaced, default is False
+            ordered (bool): Whether draw order affects outcomes, default is False
+
+        Returns:
+            Dice: The probability distribution over possible draws
+        """
+        if replace:
+            out = product(self._contents, repeat=n)
+        else:
+            out = permutations(self._contents, n)
+        out = [self._to_sorted_key(_) if not ordered else "".join(_) for _ in out]
+        return Dice(Counter(out))
+
+
+
 def p(expression):
     """
     Returns the probability of a True outcome from a dice expression.
@@ -433,69 +499,3 @@ def ordered(*dice_in, k=None):
         higher_threshold_survival = survival
 
     return [Dice(probs) for probs in dice_out]
-
-
-
-class Vase:
-    """
-    A collection of items that can be drawn to form a probability distribution.
-
-    A vase preserves repeated items and can model draws with or without
-    replacement, where the order of drawn items may optionally matter.
-    """
-
-    def __init__(self, contents):
-        """
-        Initialize a vase with the items it contains.
-
-        Parameters:
-            contents (list): Items available to draw from the vase
-        """
-        self._contents = contents
-
-    @classmethod
-    def from_counts(self, **kwargs):
-        """
-        Create a vase from item names and their quantities.
-
-        Parameters:
-            **kwargs (int): Item names mapped to the number of copies
-
-        Returns:
-            Vase: A vase containing the requested number of each item
-        """
-        contents = []
-        for k, v in kwargs.items():
-            contents.extend([k]*v)
-        return Vase(contents)
-
-    def _to_sorted_key(self, tup):
-        """
-        Convert a collection of items into an order-independent key.
-
-        Parameters:
-            tup (tuple): Items drawn from the vase
-
-        Returns:
-            str: The items sorted and joined into a single key
-        """
-        return "".join(sorted(tup))
-
-    def take(self, n=1, replace=False, ordered=False):
-        """
-        Calculate the distribution of drawing items from the vase.
-
-        Parameters:
-            n (int): Number of items to draw, default is 1
-            replace (bool): Whether drawn items are replaced, default is False
-            ordered (bool): Whether draw order affects outcomes, default is False
-
-        Returns:
-            Dice: The probability distribution over possible draws
-        """
-        if replace:
-            out = product(self._contents, repeat=n)
-        else:
-            out = permutations(self._contents, n)
-        out = [self._to_sorted_key(_) if not ordered else "".join(_) for _ in out]
-        return Dice(Counter(out))
