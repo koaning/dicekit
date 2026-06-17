@@ -322,9 +322,21 @@ class Dice[T: Hashable]:
         return self.operate(other, lambda a, b: b - a)
 
     def __mul__(self, other: Any) -> "Dice[Any]":
+        if isinstance(other, int) and not isinstance(other, bool):
+            if other < 1:
+                raise ValueError("count must be at least 1")
+            return reduce(lambda a, b: a + b, [self] * other)
         return self.operate(other, lambda a, b: a * b)
 
     def __rmul__(self, other: Any) -> "Dice[Any]":
+        if isinstance(other, int) and not isinstance(other, bool):
+            return self.__mul__(other)
+        return self.operate(other, lambda a, b: a * b)
+
+    def __matmul__(self, other: Any) -> "Dice[Any]":
+        return self.operate(other, lambda a, b: a * b)
+
+    def __rmatmul__(self, other: Any) -> "Dice[Any]":
         return self.operate(other, lambda a, b: a * b)
 
     def __le__(self, other: Any) -> "Dice[bool]":
