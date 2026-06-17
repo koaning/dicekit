@@ -54,6 +54,11 @@ def test_dice_creation():
     assert len(custom.probs) == 2
     assert custom.probs[1] == 0.5
 
+def test_dice_from_numbers():
+    dice = Dice.from_numbers(1, 1, 2)
+
+    assert dice.probs == {1: pytest.approx(2 / 3), 2: pytest.approx(1 / 3)}
+
 def test_dice_operations():
     d1 = Dice({1: 0.5, 2: 0.5})
     d2 = Dice({1: 0.5, 2: 0.5})
