@@ -1,5 +1,6 @@
 import pytest
 from itertools import product
+from statistics import NormalDist
 from dicekit import Dice, Vase, p, exp, mix, var, ordered
 
 
@@ -258,6 +259,64 @@ def test_dice_ordered_mixed_dice_matches_old_method():
     ]
 
     assert_dice_probs_close(ordered(*dice), old_method_ordered(*dice))
+
+def test_from_dist_equiprobable_faces():
+    dice = Dice.from_dist(NormalDist(0, 1), n=10)
+    assert len(dice.probs) == 10
+    assert all(v == pytest.approx(0.1) for v in dice.probs.values())
+    assert sum(dice.probs.values()) == pytest.approx(1.0)
+
+
+def test_from_dist_symmetric_normal():
+    dice = Dice.from_dist(NormalDist(0, 1), n=10)
+    outcomes = sorted(dice.probs)
+    for low, high in zip(outcomes, reversed(outcomes)):
+        assert low == pytest.approx(-high)
+    assert exp(dice) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_from_dist_monotonic_midpoints():
+    n = 8
+    dice = Dice.from_dist(NormalDist(0, 1), n=n)
+    outcomes = [NormalDist(0, 1).inv_cdf((i + 0.5) / n) for i in range(n)]
+    assert all(a < b for a, b in zip(outcomes, outcomes[1:]))
+    assert set(dice.probs) == set(outcomes)
+
+
+def test_from_dist_custom_quantiles():
+    dist = NormalDist(0, 1)
+    dice = Dice.from_dist(dist, quantiles=[0.25, 0.5, 0.75])
+    assert len(dice.probs) == 3
+    assert all(v == pytest.approx(1 / 3) for v in dice.probs.values())
+    expected = {dist.inv_cdf(q) for q in (0.25, 0.5, 0.75)}
+    assert set(dice.probs) == expected
+
+
+def test_from_dist_duck_typed_ppf():
+    class StubDist:
+        def ppf(self, q):
+            return q
+
+    dice = Dice.from_dist(StubDist(), n=4)
+    assert len(dice.probs) == 4
+    assert set(dice.probs) == {0.125, 0.375, 0.625, 0.875}
+
+
+def test_from_dist_mean_tracks_distribution():
+    dice = Dice.from_dist(NormalDist(5, 2), n=50)
+    assert exp(dice) == pytest.approx(5, abs=0.05)
+
+
+def test_from_dist_requires_inverse_cdf():
+    with pytest.raises(TypeError):
+        Dice.from_dist(object())
+
+
+@pytest.mark.parametrize("quantiles", [[], [0.0, 0.5], [0.5, 1.0]])
+def test_from_dist_rejects_bad_quantiles(quantiles):
+    with pytest.raises(ValueError):
+        Dice.from_dist(NormalDist(0, 1), quantiles=quantiles)
+
 
 @pytest.mark.parametrize("k", [1, 2, 3])
 def test_dice_ordered_k_matches_prefix(k):

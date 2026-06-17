@@ -54,6 +54,47 @@ class Dice:
         c = Counter(args)
         return cls({k: v / len(args) for k, v in args.items()})
 
+    @classmethod
+    def from_dist(cls, dist, n=6, quantiles=None):
+        """
+        Approximate a distribution with a dice by slicing equiprobable quantiles.
+
+        `dist` is any object exposing an inverse-CDF: a frozen scipy.stats
+        distribution (``.ppf``) or a ``statistics.NormalDist`` (``.inv_cdf``).
+
+        By default the dice has `n` equiprobable faces placed at the midpoint
+        of each quantile bin, i.e. ``ppf((i + 0.5) / n)`` for ``i`` in
+        ``range(n)``. Pass an explicit `quantiles` sequence of probabilities in
+        (0, 1) to control where the slices are taken; each resulting face is
+        still equiprobable.
+
+        Parameters:
+            dist: An object with a `.ppf` or `.inv_cdf` inverse-CDF method
+            n (int): Number of equiprobable faces, default is 6
+            quantiles: Optional sequence of probabilities in (0, 1) to slice at
+
+        Returns:
+            Dice: A dice approximating the distribution
+        """
+        if hasattr(dist, "ppf"):
+            inv_cdf = dist.ppf
+        elif hasattr(dist, "inv_cdf"):
+            inv_cdf = dist.inv_cdf
+        else:
+            raise TypeError("from_dist needs an object with .ppf or .inv_cdf")
+
+        qs = list(quantiles) if quantiles is not None else [(i + 0.5) / n for i in range(n)]
+        if not qs:
+            raise ValueError("from_dist needs at least one quantile")
+        if any(not (0 < q < 1) for q in qs):
+            raise ValueError("quantiles must be strictly between 0 and 1")
+
+        probs = {}
+        for q in qs:
+            outcome = inv_cdf(q)
+            probs[outcome] = probs.get(outcome, 0) + 1 / len(qs)
+        return cls(probs)
+
     def roll(self, n=1):
         """
         Simulate rolling the dice n times.
