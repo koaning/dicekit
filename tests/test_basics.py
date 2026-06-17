@@ -1,4 +1,5 @@
 import pytest
+from fractions import Fraction
 from itertools import product
 from dicekit import Dice, Vase, p, exp, mix, var, ordered
 
@@ -161,6 +162,63 @@ def test_dice_equality_with_categorical_value():
     assert p(draws == "bbb") == pytest.approx(1 / 8)
     assert p(draws != "bbb") == pytest.approx(7 / 8)
     assert p(draws == "ccc") == 0
+
+def test_fraction_probs_stay_exact():
+    d = Dice({1: Fraction(1), 2: Fraction(1), 3: Fraction(1)})
+
+    # probabilities remain exact Fractions, not floats
+    assert all(isinstance(v, Fraction) for v in d.probs.values())
+    assert d.probs == {1: Fraction(1, 3), 2: Fraction(1, 3), 3: Fraction(1, 3)}
+
+    # exp stays exact and arithmetic keeps Fraction values
+    assert exp(d) == Fraction(2)
+    summed = d + d
+    assert all(isinstance(v, Fraction) for v in summed.probs.values())
+    assert summed.probs[4] == Fraction(1, 3)
+
+
+def test_fraction_outcomes():
+    d = Dice({Fraction(1, 2): 1, Fraction(3, 2): 1})
+    shifted = d + Fraction(1, 2)
+    assert set(shifted.probs) == {Fraction(1), Fraction(2)}
+
+    # Fraction outcomes dedupe with equal ints (hash(F(3)) == hash(3))
+    mixed = Dice({Fraction(3, 1): 1}) + Dice({0: 1})
+    assert list(mixed.probs) == [3]
+
+
+def test_ordered_preserves_fraction_exactness():
+    d3 = Dice({1: Fraction(1, 3), 2: Fraction(1, 3), 3: Fraction(1, 3)})
+    highest, lowest = ordered(d3, d3)
+
+    # results stay exact, and agree with the float computation
+    assert all(isinstance(v, Fraction) for v in highest.probs.values())
+    assert highest.probs[3] == Fraction(5, 9)  # P(max == 3) = 1 - (2/3)^2
+    float_highest = Dice.from_sides(3).out_of(2, max)
+    for outcome, prob in highest.probs.items():
+        assert float(prob) == pytest.approx(float_highest.probs[outcome])
+
+
+def test_charts_render_with_fractions():
+    import marimo as mo
+
+    cases = [
+        Dice({1: Fraction(1), 2: Fraction(1)}),        # Fraction probabilities
+        Dice({Fraction(1, 2): 1, Fraction(3, 2): 1}),  # Fraction outcomes
+    ]
+    for d in cases:
+        # these used to raise "Object of type Fraction is not JSON serializable"
+        assert mo.as_html(d.prob_chart()).text
+        assert mo.as_html(d.cdf_chart()).text
+
+
+def test_charts_still_render_with_string_keys():
+    import marimo as mo
+
+    draws = Vase.from_counts(a=2, b=1).take(2, replace=True)
+    assert all(isinstance(k, str) for k in draws.probs)
+    assert mo.as_html(draws.prob_chart()).text
+
 
 def test_dice_filter():
     d6 = Dice.from_sides(6)
