@@ -27,6 +27,8 @@ jobs:
       run: uv sync --group dev
     - name: Run tests
       run: uv run pytest
+    - name: Run type checks
+      run: uv run basedpyright dicekit
 
   build:
     runs-on: ubuntu-latest

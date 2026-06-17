@@ -30,6 +30,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "basedpyright",
     "pytest",
 ]
 
@@ -46,3 +47,15 @@ exclude = [
     "notebooks",
     "tests",
 ]
+
+[tool.setuptools.package-data]
+dicekit = ["py.typed"]
+
+[tool.basedpyright]
+include = ["dicekit"]
+exclude = ["nbs"]
+reportMissingTypeStubs = false
+typeCheckingMode = "basic"
+
+[tool.marimo.language_servers.basedpyright]
+enabled = true
