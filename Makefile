@@ -15,5 +15,8 @@ pypi: clean test
 test:
 	uv run pytest
 
+typecheck:
+	uv run basedpyright dicekit
+
 clean:
 	rm -rf dist nbs/__pycache__ dicekit/__pycache__
