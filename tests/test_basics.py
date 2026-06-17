@@ -225,13 +225,28 @@ def test_dice_ordered_3():
     for k, v in a3.probs.items():
         assert abs(v - d6.out_of(3, min).probs[k]) < 1e-8
 
-def test_dice_ordered_mixed_dice_matches_brute_force():
-    dice = [
-        Dice.from_sides(4),
-        Dice.from_sides(6),
-        Dice({1: 0.1, 5: 0.2, 9: 0.7}),
-    ]
-
+@pytest.mark.parametrize(
+    "dice",
+    [
+        (
+            Dice.from_sides(4),
+            Dice.from_sides(6),
+            Dice({1: 0.1, 5: 0.2, 9: 0.7}),
+        ),
+        (
+            Dice({1: 1, 3: 2, 10: 1}),
+            Dice({3: 1, 10: 1}),
+            Dice({1: 4, 10: 1}),
+        ),
+        (
+            Dice.from_sides(3),
+            Dice({0: 1, 2: 2}),
+            Dice({1: 1, 4: 1}),
+            Dice({-1: 1, 5: 3}),
+        ),
+    ],
+)
+def test_dice_ordered_matches_brute_force(dice):
     assert_dice_probs_close(ordered(*dice), brute_force_ordered(*dice))
 
 def test_dice_ordered_mixed_dice_matches_old_method():
@@ -244,24 +259,16 @@ def test_dice_ordered_mixed_dice_matches_old_method():
 
     assert_dice_probs_close(ordered(*dice), old_method_ordered(*dice))
 
-def test_dice_ordered_sparse_faces_matches_brute_force():
-    dice = [
-        Dice({1: 1, 3: 2, 10: 1}),
-        Dice({3: 1, 10: 1}),
-        Dice({1: 4, 10: 1}),
-    ]
-
-    assert_dice_probs_close(ordered(*dice), brute_force_ordered(*dice))
-
-def test_dice_ordered_k_matches_prefix():
+@pytest.mark.parametrize("k", [1, 2, 3])
+def test_dice_ordered_k_matches_prefix(k):
     dice = [
         Dice.from_sides(4),
         Dice.from_sides(6),
         Dice({1: 0.1, 5: 0.2, 9: 0.7}),
     ]
 
-    first_two = ordered(*dice, k=2)
+    first_two = ordered(*dice, k=k)
     all_ordered = ordered(*dice)
 
-    assert len(first_two) == 2
-    assert_dice_probs_close(first_two, all_ordered[:2])
+    assert len(first_two) == k
+    assert_dice_probs_close(first_two, all_ordered[:k])
