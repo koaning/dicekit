@@ -325,10 +325,12 @@ def _():
     from hastyplot import qplot
     import random
     from collections.abc import Callable, Hashable, Mapping, Sequence
-    from collections import Counter
+    from collections import Counter, defaultdict
+    from dataclasses import dataclass
     from itertools import product, permutations
     from functools import reduce
     from fractions import Fraction
+    from operator import mul
     from typing import Any, Self, TypeAlias, cast
 
     # Probability weights may be exact (Fraction) or inexact (int/float). Fraction
@@ -668,7 +670,7 @@ def _():
         def __len__(self) -> int:
             return len(self.probs)
 
-    return Any, Callable, Counter, Dice, Fraction, Hashable, Mapping, Sequence, Weight, cast, mo, permutations, product, random, reduce
+    return Any, Callable, Counter, Dice, Fraction, Hashable, Mapping, Sequence, Weight, cast, dataclass, defaultdict, mo, mul, permutations, product, random, reduce
 
 
 @app.cell
@@ -744,20 +746,26 @@ def _(Counter, Dice, Sequence, permutations, product):
 
 
 @app.cell
-def _(Any, Callable, Dice, Hashable, Sequence, Weight, cast, product, reduce):
+def _(Any, Dice, Hashable, Sequence, Weight, cast):
     ## Export
 
+    from functools import singledispatch
 
-    def p(expression: "Dice[bool]") -> Weight:
+
+    @singledispatch
+    def p(expression: object, given: object = None) -> Any:
         """
-        Returns the probability of a True outcome from a dice expression.
+        Evaluate a probability expression.
 
-        Parameters:
-            expression: A Dice object representing a boolean comparison
-
-        Returns:
-            The probability of the True outcome (a Fraction when the dice is exact)
+        For a boolean Dice this returns P(True). The DAG layer in
+        ``dicekit.learn`` registers handlers for its node and event types,
+        so importing that module teaches ``p`` to query a DAG.
         """
+        raise TypeError("p expects a Dice, DAG node, or DAG event")
+
+
+    @p.register(Dice)
+    def _p_dice(expression: "Dice[Any]", given: object = None) -> Any:
         return expression.probs.get(True, 0)
 
 

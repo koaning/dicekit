@@ -1,5 +1,6 @@
 build:
-	uv run python nbs/build.py
+	uv run mobuild export nbs/__init__.py dicekit/__init__.py
+	uv run mobuild export nbs/learn.py dicekit/learn.py
 
 install:
 	uv venv
