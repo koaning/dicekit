@@ -8,9 +8,31 @@ from collections.abc import Callable, Hashable, Mapping, Sequence
 from collections import Counter
 from itertools import product, permutations
 from functools import reduce
+from fractions import Fraction
 from typing import Any, Self, TypeAlias, cast
 
-Weight: TypeAlias = int | float
+# Probability weights may be exact (Fraction) or inexact (int/float). Fraction
+# interoperates cleanly with int and float (Fraction + float -> float), so mixing
+# downgrades to float rather than erroring. Decimal is intentionally excluded
+# because Decimal + float raises at runtime.
+Weight: TypeAlias = int | float | Fraction
+
+
+def _plot_value(value: Any) -> Any:
+    """
+    Coerce a value into something a chart can serialize.
+
+    Numeric outcomes/probabilities (Fraction, Decimal, numpy scalars, ...) are
+    cast to float so they render, while non-numeric keys such as the string keys
+    produced by a Vase (and boolean comparison outcomes) are left untouched.
+    """
+    if isinstance(value, (bool, str)):
+        return value
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return value
+
 
 class Dice[T: Hashable]:
     """
@@ -66,7 +88,11 @@ class Dice[T: Hashable]:
         Returns:
             list: Results of the dice rolls
         """
-        return random.choices(list(self.probs.keys()), weights=list(self.probs.values()), k=n)
+        return random.choices(
+            list(self.probs.keys()),
+            weights=cast(Any, list(self.probs.values())),
+            k=n,
+        )
 
     def sample(self, n: int = 1) -> list[T]:
         """
@@ -118,7 +144,7 @@ class Dice[T: Hashable]:
             except TypeError as exc:
                 raise TypeError("operations require a Dice or hashable value") from exc
         other = cast(Dice[U], other)
-        new_probs: dict[V, float] = {}
+        new_probs: dict[V, Weight] = {}
         for s1, p1 in self.probs.items():
             for s2, p2 in other.probs.items():
                 new_key = operator(s1, s2)
@@ -157,7 +183,9 @@ class Dice[T: Hashable]:
         Returns:
             alt.Chart: An Altair chart showing the probability mass function
         """
-        df = pd.DataFrame([{"i": k, "p": v} for k, v in self.probs.items()])
+        df = pd.DataFrame(
+            [{"i": _plot_value(k), "p": _plot_value(v)} for k, v in self.probs.items()]
+        )
         return qplot(
             df,
             "i",
@@ -181,7 +209,7 @@ class Dice[T: Hashable]:
         rows = []
         for outcome, probability in sorted(self.probs.items()):
             cumulative += probability
-            rows.append({"i": outcome, "p": cumulative})
+            rows.append({"i": _plot_value(outcome), "p": _plot_value(cumulative)})
         df = pd.DataFrame(rows)
         return qplot(
             df,
@@ -220,7 +248,7 @@ class Dice[T: Hashable]:
         Returns:
             Dice: A new dice representing the distribution of the function's results
         """
-        result: dict[U, float] = {}
+        result: dict[U, Weight] = {}
         dice_in = [self] * n
         for _i in product(*[d.probs.items() for d in dice_in]):
             values = [_[0] for _ in _i]
@@ -342,7 +370,7 @@ class Vase:
 
 
 
-def p(expression: "Dice[bool]") -> float:
+def p(expression: "Dice[bool]") -> Weight:
     """
     Returns the probability of a True outcome from a dice expression.
 
@@ -350,12 +378,12 @@ def p(expression: "Dice[bool]") -> float:
         expression: A Dice object representing a boolean comparison
 
     Returns:
-        float: The probability of the True outcome
+        The probability of the True outcome (a Fraction when the dice is exact)
     """
     return expression.probs.get(True, 0)
 
 
-def exp(dice: "Dice[int | float]") -> float:
+def exp(dice: "Dice[Weight]") -> Weight:
     """
     Calculates the expected value (mean) of a dice.
 
@@ -363,12 +391,12 @@ def exp(dice: "Dice[int | float]") -> float:
         dice: A Dice object
 
     Returns:
-        float: The expected value of the dice
+        The expected value of the dice (a Fraction when the dice is exact)
     """
     return sum(i * p for i, p in dice.probs.items())
 
 
-def var(dice: "Dice[int | float]") -> float:
+def var(dice: "Dice[Weight]") -> Weight:
     """
     Calculates the variance of a dice.
 
@@ -376,7 +404,7 @@ def var(dice: "Dice[int | float]") -> float:
         dice: A Dice object
 
     Returns:
-        float: The variance of the dice
+        The variance of the dice (a Fraction when the dice is exact)
     """
     return sum(p * (i - exp(dice)) ** 2 for i, p in dice.probs.items())
 
@@ -407,7 +435,7 @@ def mix[T: Hashable](*dice: "Dice[T]", weights: Sequence[Weight] | None = None) 
     if total_weight == 0:
         raise ValueError("weights must have a positive sum")
 
-    new_probs: dict[T, float] = {}
+    new_probs: dict[T, Weight] = {}
     for die, weight in zip(dice, weights):
         for outcome, probability in die.probs.items():
             contribution = probability * weight / total_weight
@@ -419,12 +447,12 @@ def _slice_limit(length: int, stop: int) -> int:
     return len(range(length)[:stop])
 
 
-def _threshold_probabilities[T: Hashable](die: "Dice[T]", thresholds: Sequence[T]) -> dict[T, float]:
+def _threshold_probabilities[T: Hashable](die: "Dice[T]", thresholds: Sequence[T]) -> dict[T, Weight]:
     """
     Return P(die >= threshold) for each threshold.
     """
-    probabilities: dict[T, float] = {}
-    cumulative = 0
+    probabilities: dict[T, Weight] = {}
+    cumulative: Weight = 0
     items = sorted(cast(list[Any], list(die.probs.items())), reverse=True)
     item_index = 0
 
@@ -464,16 +492,22 @@ def ordered[T: Hashable](*dice_in: "Dice[T]", k: int | None = None) -> list["Dic
         for die in dice_in
     ]
 
-    dice_out: list[dict[T, float]] = [{} for _ in range(n_outputs)]
-    higher_threshold_survival: list[float] = [0.0] * (n_outputs + 1)
+    # Seed with int 0/1 (not 0.0/1.0) so exact Fraction probabilities stay exact;
+    # the float path is unaffected (int * float == float * float).
+    zero: Weight = 0
+    one: Weight = 1
+
+    dice_out: list[dict[T, Weight]] = [{} for _ in range(n_outputs)]
+    higher_threshold_survival: list[Weight] = [zero] * (n_outputs + 1)
 
     for threshold in thresholds:
-        pass_count_probs: list[float] = [1.0] + [0.0] * n_outputs
+        pass_count_probs: list[Weight] = [zero] * (n_outputs + 1)
+        pass_count_probs[0] = one
 
         for probability in probabilities:
             p_ge = probability[threshold]
             p_lt = 1 - p_ge
-            new_pass_count_probs: list[float] = [0.0] * (n_outputs + 1)
+            new_pass_count_probs: list[Weight] = [zero] * (n_outputs + 1)
 
             for pass_count, pass_count_probability in enumerate(pass_count_probs):
                 if pass_count_probability == 0:
@@ -486,8 +520,8 @@ def ordered[T: Hashable](*dice_in: "Dice[T]", k: int | None = None) -> list["Dic
 
             pass_count_probs = new_pass_count_probs
 
-        survival: list[float] = [0.0] * (n_outputs + 1)
-        running = 0.0
+        survival: list[Weight] = [zero] * (n_outputs + 1)
+        running: Weight = 0
         for pass_count in range(n_outputs, -1, -1):
             running += pass_count_probs[pass_count]
             survival[pass_count] = running
@@ -496,7 +530,7 @@ def ordered[T: Hashable](*dice_in: "Dice[T]", k: int | None = None) -> list["Dic
             order = order_index + 1
             probability = survival[order] - higher_threshold_survival[order]
             if probability < 0 and abs(probability) < 1e-15:
-                probability = 0.0
+                probability = 0
             if probability != 0:
                 dice_out[order_index][threshold] = probability
 
