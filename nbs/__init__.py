@@ -103,6 +103,52 @@ def _(Dice, mo, sides_slider):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
+    You can also approximate a continuous distribution with a dice via `Dice.from_dist`. It slices equiprobable quantiles out of any object that exposes an inverse-CDF, such as a `statistics.NormalDist` (`.inv_cdf`) or a frozen `scipy.stats` distribution (`.ppf`).
+
+    Two keyword arguments steer the approximation:
+
+    - `n` (default `6`): the number of equiprobable faces, placed at the midpoint of each quantile bin. The more faces you ask for, the closer the approximation.
+    - `quantiles`: an explicit sequence of probabilities in `(0, 1)` to slice at, instead of `n` evenly spaced midpoints. Every resulting face stays equiprobable.
+    """)
+    return
+
+
+@app.cell
+def _(Dice):
+    from statistics import NormalDist
+
+    Dice.from_dist(NormalDist(0, 1), n=12)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    Because `from_dist` only needs an object with a `.ppf` (or `.inv_cdf`) method, you can also reach for `numpy`. The exponential distribution has a closed-form inverse-CDF, `ppf(q) = -scale * log(1 - q)`, so a tiny wrapper is all it takes.
+    """)
+    return
+
+
+@app.cell
+def _(Dice):
+    import numpy as np
+
+
+    class Exponential:
+        def __init__(self, scale=1.0):
+            self.scale = scale
+
+        def ppf(self, q):
+            return float(-self.scale * np.log(1 - q))
+
+
+    Dice.from_dist(Exponential(scale=2.0), n=12)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
     When you have dice, you're typically also interested in their probabilities. You can use comparison operators for this, and we also have a convience function to give you the probability that you're interested in.
 
     ```python
@@ -351,6 +397,52 @@ def _():
             """
             c = Counter(args)
             return cast(Dice[U], cast(Any, cls)({k: v / len(args) for k, v in c.items()}))
+
+        @classmethod
+        def from_dist(
+            cls,
+            dist: Any,
+            n: int = 6,
+            quantiles: Sequence[float] | None = None,
+        ) -> "Dice[float]":
+            """
+            Approximate a distribution with a dice by slicing equiprobable quantiles.
+
+            `dist` is any object exposing an inverse-CDF: a frozen scipy.stats
+            distribution (``.ppf``) or a ``statistics.NormalDist`` (``.inv_cdf``).
+
+            By default the dice has `n` equiprobable faces placed at the midpoint
+            of each quantile bin, i.e. ``ppf((i + 0.5) / n)`` for ``i`` in
+            ``range(n)``. Pass an explicit `quantiles` sequence of probabilities in
+            (0, 1) to control where the slices are taken; each resulting face is
+            still equiprobable.
+
+            Parameters:
+                dist: An object with a `.ppf` or `.inv_cdf` inverse-CDF method
+                n (int): Number of equiprobable faces, default is 6
+                quantiles: Optional sequence of probabilities in (0, 1) to slice at
+
+            Returns:
+                Dice: A dice approximating the distribution
+            """
+            if hasattr(dist, "ppf"):
+                inv_cdf = dist.ppf
+            elif hasattr(dist, "inv_cdf"):
+                inv_cdf = dist.inv_cdf
+            else:
+                raise TypeError("from_dist needs an object with .ppf or .inv_cdf")
+
+            qs = list(quantiles) if quantiles is not None else [(i + 0.5) / n for i in range(n)]
+            if not qs:
+                raise ValueError("from_dist needs at least one quantile")
+            if any(not (0 < q < 1) for q in qs):
+                raise ValueError("quantiles must be strictly between 0 and 1")
+
+            probs: dict[float, Weight] = {}
+            for q in qs:
+                outcome = float(inv_cdf(q))
+                probs[outcome] = probs.get(outcome, 0) + 1 / len(qs)
+            return cast("Dice[float]", cast(Any, cls)(probs))
 
         def roll(self, n: int = 1) -> list[T]:
             """
