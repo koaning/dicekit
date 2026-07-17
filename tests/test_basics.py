@@ -49,33 +49,36 @@ def test_dice_creation():
     # Test basic dice creation
     d6 = Dice.from_sides(6)
     assert len(d6.probs) == 6
-    assert all(abs(v - 1/6) < 1e-10 for v in d6.probs.values())
+    assert all(abs(v - 1 / 6) < 1e-10 for v in d6.probs.values())
 
     # Test custom dice creation
     custom = Dice({1: 0.5, 2: 0.5})
     assert len(custom.probs) == 2
     assert custom.probs[1] == 0.5
 
+
 def test_dice_from_numbers():
     dice = Dice.from_numbers(1, 1, 2)
 
     assert dice.probs == {1: pytest.approx(2 / 3), 2: pytest.approx(1 / 3)}
 
+
 def test_dice_operations():
     d1 = Dice({1: 0.5, 2: 0.5})
     d2 = Dice({1: 0.5, 2: 0.5})
-    
+
     # Test addition
     d_sum = d1 + d2
     assert d_sum.probs[2] == 0.25  # P(1+1)
-    assert d_sum.probs[3] == 0.5   # P(1+2 or 2+1)
+    assert d_sum.probs[3] == 0.5  # P(1+2 or 2+1)
     assert d_sum.probs[4] == 0.25  # P(2+2)
 
     # Test multiplication
     d_mult = d1 * d2
     assert d_mult.probs[1] == 0.25  # P(1*1)
-    assert d_mult.probs[2] == 0.5   # P(1*2 or 2*1)
+    assert d_mult.probs[2] == 0.5  # P(1*2 or 2*1)
     assert d_mult.probs[4] == 0.25  # P(2*2)
+
 
 def test_dice_map():
     dice = Dice({1: 0.25, 2: 0.25, 3: 0.5})
@@ -86,6 +89,7 @@ def test_dice_map():
     labels = dice.map({1: "low", 2: "low", 3: "high"})
     assert labels.probs == {"low": 0.5, "high": 0.5}
 
+
 def test_dice_mix():
     first = Dice({"a": 1})
     second = Dice({"b": 1})
@@ -95,6 +99,7 @@ def test_dice_mix():
 
     weighted = mix(first, second, weights=[1, 3])
     assert weighted.probs == {"a": 0.25, "b": 0.75}
+
 
 def test_dice_mix_validates_arguments():
     dice = Dice({1: 1})
@@ -109,6 +114,7 @@ def test_dice_mix_validates_arguments():
         mix(dice, dice, weights=[0, 0])
     with pytest.raises(ValueError, match="at least one"):
         mix()
+
 
 def test_dice_sum():
     d6 = Dice.from_sides(6)
@@ -130,6 +136,7 @@ def test_dice_sum():
     d_with_zero = Dice({0: 0.5, 1: 0.5})
     assert sum([d_with_zero, d_with_zero]).probs == {0: 0.25, 1: 0.5, 2: 0.25}
 
+
 def test_dice_reflected_operations():
     d = Dice({1: 0.5, 2: 0.5})
 
@@ -145,6 +152,7 @@ def test_dice_reflected_operations():
     assert d_mult.probs[2] == 0.5
     assert d_mult.probs[4] == 0.5
 
+
 def test_dice_mul_counts_rolls():
     d6 = Dice.from_sides(6)
 
@@ -155,6 +163,7 @@ def test_dice_mul_counts_rolls():
     reflected = 3 * d6
     assert abs(exp(reflected) - exp(three_d6)) < 1e-10
 
+
 def test_dice_matmul_scales_values():
     d = Dice({1: 0.5, 2: 0.5})
 
@@ -164,6 +173,7 @@ def test_dice_matmul_scales_values():
 
     reflected = 2 @ d
     assert reflected.probs == scaled.probs
+
 
 def test_dice_mul_and_matmul_differ():
     d6 = Dice.from_sides(6)
@@ -176,10 +186,11 @@ def test_dice_mul_and_matmul_differ():
     assert 7 not in scaled.probs
     assert scaled.probs[12] == pytest.approx(1 / 6)
 
+
 def test_dice_comparisons():
     d1 = Dice({1: 0.5, 2: 0.5})
     d2 = Dice({1: 0.5, 2: 0.5})
-    
+
     # Test greater than
     d_gt = d1 > d2
     assert p(d_gt) == 0.25  # P(2 > 1) = 0.25
@@ -188,12 +199,14 @@ def test_dice_comparisons():
     d_le = d1 <= d2
     assert p(d_le) == 0.75  # P(1 ≤ 1 or 1 ≤ 2 or 2 ≤ 2) = 0.75
 
+
 def test_dice_equality_with_categorical_value():
     draws = Vase.from_counts(a=3, b=3).take(3, replace=True, ordered=False)
 
     assert p(draws == "bbb") == pytest.approx(1 / 8)
     assert p(draws != "bbb") == pytest.approx(7 / 8)
     assert p(draws == "ccc") == 0
+
 
 def test_fraction_probs_stay_exact():
     d = Dice({1: Fraction(1), 2: Fraction(1), 3: Fraction(1)})
@@ -235,7 +248,7 @@ def test_charts_render_with_fractions():
     import marimo as mo
 
     cases = [
-        Dice({1: Fraction(1), 2: Fraction(1)}),        # Fraction probabilities
+        Dice({1: Fraction(1), 2: Fraction(1)}),  # Fraction probabilities
         Dice({Fraction(1, 2): 1, Fraction(3, 2): 1}),  # Fraction outcomes
     ]
     for d in cases:
@@ -258,21 +271,24 @@ def test_dice_filter():
     assert len(d_even.probs) == 3  # Only 2, 4, 6
     assert abs(sum(d_even.probs.values()) - 1.0) < 1e-10
 
+
 def test_dice_out_of():
     d6 = Dice.from_sides(6)
     max_of_2 = d6.out_of(2, max)
     # P(getting a 6 from 2d6) = 11/36
-    assert abs(max_of_2.probs[6] - 11/36) < 1e-10
+    assert abs(max_of_2.probs[6] - 11 / 36) < 1e-10
+
 
 def test_statistics():
     # Test a fair d6
     d6 = Dice.from_sides(6)
-    
+
     # Expected value should be 3.5
     assert abs(exp(d6) - 3.5) < 1e-10
-    
+
     # Variance should be 35/12 ≈ 2.916667
-    assert abs(var(d6) - 35/12) < 1e-10
+    assert abs(var(d6) - 35 / 12) < 1e-10
+
 
 def test_dice_roll():
     d6 = Dice.from_sides(6)
@@ -280,27 +296,30 @@ def test_dice_roll():
     assert len(rolls) == 1000
     assert all(1 <= r <= 6 for r in rolls)
 
+
 def test_dice_ordered_2():
     d6 = Dice.from_sides(6)
     a1, a2 = ordered(d6, d6)
-    assert a1.probs[1] == pytest.approx(1/6/6)
+    assert a1.probs[1] == pytest.approx(1 / 6 / 6)
     for k, v in a1.probs.items():
         assert abs(v - d6.out_of(2, max).probs[k]) < 1e-10
     for k, v in a2.probs.items():
         assert abs(v - d6.out_of(2, min).probs[k]) < 1e-10
+
 
 def test_dice_ordered_method():
     d6 = Dice.from_sides(6)
     a1, a2 = d6.ordered(2)
-    assert a1.probs[1] == pytest.approx(1/6/6)
+    assert a1.probs[1] == pytest.approx(1 / 6 / 6)
     for k, v in a1.probs.items():
         assert abs(v - d6.out_of(2, max).probs[k]) < 1e-10
     for k, v in a2.probs.items():
         assert abs(v - d6.out_of(2, min).probs[k]) < 1e-10
 
-    highest, = d6.ordered(2, k=1)
+    (highest,) = d6.ordered(2, k=1)
     for k, v in highest.probs.items():
         assert abs(v - d6.out_of(2, max).probs[k]) < 1e-10
+
 
 def test_dice_ordered_method_limits_work_to_k_results():
     d6 = Dice.from_sides(6)
@@ -311,14 +330,16 @@ def test_dice_ordered_method_limits_work_to_k_results():
     assert len(first_two) == 2
     assert_dice_probs_close(first_two, all_ordered[:2])
 
+
 def test_dice_ordered_3():
     d6 = Dice.from_sides(6)
     a1, _, a3 = ordered(d6, d6, d6)
-    assert a1.probs[1] == pytest.approx(1/6/6/6)
+    assert a1.probs[1] == pytest.approx(1 / 6 / 6 / 6)
     for k, v in a1.probs.items():
         assert abs(v - d6.out_of(3, max).probs[k]) < 1e-8
     for k, v in a3.probs.items():
         assert abs(v - d6.out_of(3, min).probs[k]) < 1e-8
+
 
 @pytest.mark.parametrize(
     "dice",
@@ -344,6 +365,7 @@ def test_dice_ordered_3():
 def test_dice_ordered_matches_brute_force(dice):
     assert_dice_probs_close(ordered(*dice), brute_force_ordered(*dice))
 
+
 def test_dice_ordered_mixed_dice_matches_old_method():
     dice = [
         Dice.from_sides(4),
@@ -354,62 +376,93 @@ def test_dice_ordered_mixed_dice_matches_old_method():
 
     assert_dice_probs_close(ordered(*dice), old_method_ordered(*dice))
 
-def test_from_dist_equiprobable_faces():
-    dice = Dice.from_dist(NormalDist(0, 1), n=10)
-    assert len(dice.probs) == 10
-    assert all(v == pytest.approx(0.1) for v in dice.probs.values())
+
+def test_from_dist_grid_outcomes():
+    dice = Dice.from_dist(NormalDist(0, 1), min=-3, max=3, step=1)
+    assert set(dice.probs) == {-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0}
     assert sum(dice.probs.values()) == pytest.approx(1.0)
 
 
-def test_from_dist_symmetric_normal():
-    dice = Dice.from_dist(NormalDist(0, 1), n=10)
+def test_from_dist_shape_is_gaussian():
+    dist = NormalDist(0, 1)
+    dice = Dice.from_dist(dist, min=-4, max=4, step=1)
     outcomes = sorted(dice.probs)
+    # symmetric about 0
     for low, high in zip(outcomes, reversed(outcomes)):
         assert low == pytest.approx(-high)
+    # the peak sits at 0 and probabilities fall off away from it
+    p_zero = dice.probs[0.0]
+    assert p_zero > dice.probs[1.0] > dice.probs[2.0] > dice.probs[3.0]
+    assert p_zero == pytest.approx(dist.pdf(0.0) / sum(dist.pdf(x) for x in outcomes))
     assert exp(dice) == pytest.approx(0.0, abs=1e-9)
 
 
-def test_from_dist_monotonic_midpoints():
-    n = 8
-    dice = Dice.from_dist(NormalDist(0, 1), n=n)
-    outcomes = [NormalDist(0, 1).inv_cdf((i + 0.5) / n) for i in range(n)]
-    assert all(a < b for a, b in zip(outcomes, outcomes[1:]))
-    assert set(dice.probs) == set(outcomes)
-
-
-def test_from_dist_custom_quantiles():
+def test_from_dist_weights_proportional_to_pdf():
     dist = NormalDist(0, 1)
-    dice = Dice.from_dist(dist, quantiles=[0.25, 0.5, 0.75])
-    assert len(dice.probs) == 3
-    assert all(v == pytest.approx(1 / 3) for v in dice.probs.values())
-    expected = {dist.inv_cdf(q) for q in (0.25, 0.5, 0.75)}
-    assert set(dice.probs) == expected
+    outcomes = [-2.0, -1.0, 0.0, 1.0, 2.0]
+    dice = Dice.from_dist(dist, min=-2, max=2, step=1)
+    raw = [dist.pdf(x) for x in outcomes]
+    for x, r in zip(outcomes, raw):
+        assert dice.probs[x] == pytest.approx(r / sum(raw))
 
 
-def test_from_dist_duck_typed_ppf():
+def test_from_dist_default_range_from_mean_std():
+    dice = Dice.from_dist(NormalDist(5, 2), step=0.5)
+    assert min(dice.probs) == pytest.approx(5 - 3 * 2)
+    assert max(dice.probs) == pytest.approx(5 + 3 * 2)
+    assert exp(dice) == pytest.approx(5, abs=0.2)
+
+
+def test_from_dist_duck_typed_pdf_with_callable_mean_std():
     class StubDist:
-        def ppf(self, q):
-            return q
+        def __init__(self):
+            self._mean, self._std = 10.0, 2.0
 
-    dice = Dice.from_dist(StubDist(), n=4)
-    assert len(dice.probs) == 4
-    assert set(dice.probs) == {0.125, 0.375, 0.625, 0.875}
+        def mean(self):
+            return self._mean
+
+        def std(self):
+            return self._std
+
+        def pdf(self, x):
+            return 1.0 if x == self._mean else 0.0
+
+    dice = Dice.from_dist(StubDist(), step=1)
+    assert set(dice.probs) == {10.0}
+    assert dice.probs[10.0] == pytest.approx(1.0)
 
 
-def test_from_dist_mean_tracks_distribution():
-    dice = Dice.from_dist(NormalDist(5, 2), n=50)
-    assert exp(dice) == pytest.approx(5, abs=0.05)
-
-
-def test_from_dist_requires_inverse_cdf():
+def test_from_dist_requires_pdf():
     with pytest.raises(TypeError):
         Dice.from_dist(object())
 
 
-@pytest.mark.parametrize("quantiles", [[], [0.0, 0.5], [0.5, 1.0]])
-def test_from_dist_rejects_bad_quantiles(quantiles):
+def test_from_dist_rejects_nonpositive_step():
     with pytest.raises(ValueError):
-        Dice.from_dist(NormalDist(0, 1), quantiles=quantiles)
+        Dice.from_dist(NormalDist(0, 1), min=-1, max=1, step=0)
+
+
+def test_from_dist_rejects_bad_range():
+    with pytest.raises(ValueError):
+        Dice.from_dist(NormalDist(0, 1), min=2, max=1, step=1)
+
+
+def test_from_dist_rejects_no_mass():
+    class NeverDist:
+        def pdf(self, x):
+            return 0.0
+
+    with pytest.raises(ValueError):
+        Dice.from_dist(NeverDist(), min=0, max=1, step=0.5)
+
+
+def test_from_dist_needs_explicit_range_without_mean_std():
+    class NoMoments:
+        def pdf(self, x):
+            return 1.0
+
+    with pytest.raises(ValueError):
+        Dice.from_dist(NoMoments())
 
 
 @pytest.mark.parametrize("k", [1, 2, 3])

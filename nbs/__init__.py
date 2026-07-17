@@ -103,12 +103,12 @@ def _(Dice, mo, sides_slider):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
-    You can also approximate a continuous distribution with a dice via `Dice.from_dist`. It slices equiprobable quantiles out of any object that exposes an inverse-CDF, such as a `statistics.NormalDist` (`.inv_cdf`) or a frozen `scipy.stats` distribution (`.ppf`).
+    You can also approximate a continuous distribution with a dice via `Dice.from_dist`. It samples the density (`.pdf`) of any object that exposes one, such as a `statistics.NormalDist` or a frozen `scipy.stats` distribution, across an evenly-spaced grid of outcomes so that the dice's bar chart reproduces the *shape* of the density.
 
-    Two keyword arguments steer the approximation:
+    Three keyword arguments steer the grid:
 
-    - `n` (default `6`): the number of equiprobable faces, placed at the midpoint of each quantile bin. The more faces you ask for, the closer the approximation.
-    - `quantiles`: an explicit sequence of probabilities in `(0, 1)` to slice at, instead of `n` evenly spaced midpoints. Every resulting face stays equiprobable.
+    - `min`/`max`: the range of outcomes on the grid. When omitted they default to `mean +/- 3*std` if the distribution exposes a mean and standard deviation.
+    - `step` (default `1.0`): the spacing between adjacent outcomes. Smaller steps give a finer, smoother-looking approximation.
     """)
     return
 
@@ -117,32 +117,7 @@ def _(mo):
 def _(Dice):
     from statistics import NormalDist
 
-    Dice.from_dist(NormalDist(0, 1), n=12)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    Because `from_dist` only needs an object with a `.ppf` (or `.inv_cdf`) method, you can also reach for `numpy`. The exponential distribution has a closed-form inverse-CDF, `ppf(q) = -scale * log(1 - q)`, so a tiny wrapper is all it takes.
-    """)
-    return
-
-
-@app.cell
-def _(Dice):
-    import numpy as np
-
-
-    class Exponential:
-        def __init__(self, scale=1.0):
-            self.scale = scale
-
-        def ppf(self, q):
-            return float(-self.scale * np.log(1 - q))
-
-
-    Dice.from_dist(Exponential(scale=2.0), n=12)
+    Dice.from_dist(NormalDist(0, 1), step=0.5)
     return
 
 
@@ -265,7 +240,6 @@ def _(random):
     # Simulation, just in case to check. This is not part of the library.
     from statistics import mean
 
-
     def simulate(n=10_000):
         results = []
         for _ in range(n):
@@ -273,7 +247,6 @@ def _(random):
             d1, d2 = sorted([random.randint(1, 6) for _ in range(2)], reverse=True)
             results.append((a1 > d1, a2 > d2))
         return mean([_[0] for _ in results]), mean([_[1] for _ in results])
-
 
     simulate()
     return
@@ -339,7 +312,6 @@ def _():
     # because Decimal + float raises at runtime.
     Weight: TypeAlias = int | float | Fraction
 
-
     def _plot_value(value: Any) -> Any:
         """
         Coerce a value into something a chart can serialize.
@@ -354,7 +326,6 @@ def _():
             return float(value)
         except (TypeError, ValueError):
             return value
-
 
     class Dice[T: Hashable]:
         """
@@ -398,52 +369,102 @@ def _():
                 Dice: A dice with probabilities based on the frequency of each number
             """
             c = Counter(args)
-            return cast(Dice[U], cast(Any, cls)({k: v / len(args) for k, v in c.items()}))
+            return cast(
+                Dice[U], cast(Any, cls)({k: v / len(args) for k, v in c.items()})
+            )
 
         @classmethod
         def from_dist(
             cls,
             dist: Any,
-            n: int = 6,
-            quantiles: Sequence[float] | None = None,
+            min: float | None = None,
+            max: float | None = None,
+            step: float = 1.0,
         ) -> "Dice[float]":
             """
-            Approximate a distribution with a dice by slicing equiprobable quantiles.
+            Approximate a continuous distribution with a dice by sampling its
+            density at evenly-spaced outcomes.
 
-            `dist` is any object exposing an inverse-CDF: a frozen scipy.stats
-            distribution (``.ppf``) or a ``statistics.NormalDist`` (``.inv_cdf``).
+            The dice gets one face per outcome along an evenly-spaced grid from
+            ``min`` to ``max`` (inclusive) stepping by ``step``. Each face's
+            probability is proportional to the distribution's PDF at that outcome,
+            so the dice's bar chart reproduces the *shape* of the density.
 
-            By default the dice has `n` equiprobable faces placed at the midpoint
-            of each quantile bin, i.e. ``ppf((i + 0.5) / n)`` for ``i`` in
-            ``range(n)``. Pass an explicit `quantiles` sequence of probabilities in
-            (0, 1) to control where the slices are taken; each resulting face is
-            still equiprobable.
+            `dist` is any object exposing a PDF: a frozen scipy.stats distribution
+            (``.pdf``) or a ``statistics.NormalDist`` (``.pdf``).
+
+            When `min`/`max` are omitted they default to ``mean +/- 3*std`` if the
+            distribution exposes a mean and standard deviation
+            (``.mean``/``.mean()`` and ``.sigma``/``.stdev``/``.std()``).
 
             Parameters:
-                dist: An object with a `.ppf` or `.inv_cdf` inverse-CDF method
-                n (int): Number of equiprobable faces, default is 6
-                quantiles: Optional sequence of probabilities in (0, 1) to slice at
+                dist: An object with a `.pdf` density method
+                min (float): Lowest outcome on the grid (default: derived)
+                max (float): Highest outcome on the grid (default: derived)
+                step (float): Spacing between adjacent outcomes, default is 1.0
 
             Returns:
-                Dice: A dice approximating the distribution
+                Dice: A dice whose bar chart mimics the distribution's density
             """
-            if hasattr(dist, "ppf"):
-                inv_cdf = dist.ppf
-            elif hasattr(dist, "inv_cdf"):
-                inv_cdf = dist.inv_cdf
+            if hasattr(dist, "pdf"):
+                pdf = dist.pdf
             else:
-                raise TypeError("from_dist needs an object with .ppf or .inv_cdf")
+                raise TypeError(
+                    "from_dist needs an object with a .pdf method; "
+                    "for inverse-CDF-only objects use equiprobable quantiles instead"
+                )
 
-            qs = list(quantiles) if quantiles is not None else [(i + 0.5) / n for i in range(n)]
-            if not qs:
-                raise ValueError("from_dist needs at least one quantile")
-            if any(not (0 < q < 1) for q in qs):
-                raise ValueError("quantiles must be strictly between 0 and 1")
+            if step <= 0:
+                raise ValueError("step must be positive")
+
+            if min is None or max is None:
+                mean_raw = getattr(dist, "mean", None)
+                mean = (
+                    float(cast(Any, mean_raw)())
+                    if callable(mean_raw)
+                    else (float(cast(Any, mean_raw)) if mean_raw is not None else None)
+                )
+                std_raw = getattr(dist, "sigma", None)
+                if std_raw is None:
+                    std_raw = getattr(dist, "stdev", None)
+                if std_raw is None:
+                    std_raw = getattr(dist, "std", None)
+                std = (
+                    float(cast(Any, std_raw)())
+                    if callable(std_raw)
+                    else (float(cast(Any, std_raw)) if std_raw is not None else None)
+                )
+                if mean is None or std is None or std <= 0:
+                    raise ValueError(
+                        "pass explicit min and max; the distribution exposes no "
+                        "usable mean/std to derive a default range"
+                    )
+                if min is None:
+                    min = mean - 3 * std
+                if max is None:
+                    max = mean + 3 * std
+
+            if max <= min:
+                raise ValueError("max must be greater than min")
+
+            count = int(round((max - min) / step))
+            outcomes = [min + i * step for i in range(count + 1)]
 
             probs: dict[float, Weight] = {}
-            for q in qs:
-                outcome = float(inv_cdf(q))
-                probs[outcome] = probs.get(outcome, 0) + 1 / len(qs)
+            total = 0.0
+            for x in outcomes:
+                density = float(pdf(x))
+                if density <= 0:
+                    continue
+                total += density
+                probs[float(x)] = probs.get(float(x), 0) + density
+
+            if total <= 0:
+                raise ValueError(
+                    "the [min, max] range captures no probability mass; widen it"
+                )
+
+            probs = {x: w / total for x, w in probs.items()}
             return cast("Dice[float]", cast(Any, cls)(probs))
 
         def roll(self, n: int = 1) -> list[T]:
@@ -474,7 +495,9 @@ def _():
             """
             return self.roll(n=1)
 
-        def map[U: Hashable](self, transform: Callable[[T], U] | Mapping[T, U]) -> "Dice[U]":
+        def map[U: Hashable](
+            self, transform: Callable[[T], U] | Mapping[T, U]
+        ) -> "Dice[U]":
             """
             Transform the outcomes of the dice.
 
@@ -484,7 +507,9 @@ def _():
             Returns:
                 Dice: A dice containing the transformed outcomes
             """
-            func = transform.__getitem__ if isinstance(transform, Mapping) else transform
+            func = (
+                transform.__getitem__ if isinstance(transform, Mapping) else transform
+            )
             new_probs = {}
             for outcome, probability in self.probs.items():
                 new_outcome = func(outcome)
@@ -510,7 +535,9 @@ def _():
                 try:
                     other = Dice({other: 1})
                 except TypeError as exc:
-                    raise TypeError("operations require a Dice or hashable value") from exc
+                    raise TypeError(
+                        "operations require a Dice or hashable value"
+                    ) from exc
             other = cast(Dice[U], other)
             new_probs: dict[V, Weight] = {}
             for s1, p1 in self.probs.items():
@@ -552,7 +579,10 @@ def _():
                 alt.Chart: An Altair chart showing the probability mass function
             """
             df = pd.DataFrame(
-                [{"i": _plot_value(k), "p": _plot_value(v)} for k, v in self.probs.items()]
+                [
+                    {"i": _plot_value(k), "p": _plot_value(v)}
+                    for k, v in self.probs.items()
+                ]
             )
             return qplot(
                 df,
@@ -605,7 +635,9 @@ def _():
                 return ordered(*items, k=k)
             return ordered(*items)
 
-        def out_of[U: Hashable](self, n: int = 2, func: Callable[[list[T]], U] = max) -> "Dice[U]":
+        def out_of[U: Hashable](
+            self, n: int = 2, func: Callable[[list[T]], U] = max
+        ) -> "Dice[U]":
             """
             Create a dice representing the result of applying a function to n rolls.
 
@@ -682,13 +714,31 @@ def _():
         def __len__(self) -> int:
             return len(self.probs)
 
-    return Any, Callable, Counter, Dice, Fraction, Hashable, Mapping, Sequence, Weight, cast, dataclass, defaultdict, mo, mul, permutations, product, random, reduce
+    return (
+        Any,
+        Callable,
+        Counter,
+        Dice,
+        Fraction,
+        Hashable,
+        Mapping,
+        Sequence,
+        Weight,
+        cast,
+        dataclass,
+        defaultdict,
+        mo,
+        mul,
+        permutations,
+        product,
+        random,
+        reduce,
+    )
 
 
 @app.cell
 def _(Counter, Dice, Sequence, permutations, product):
     ## Export
-
 
     class Vase:
         """
@@ -720,7 +770,7 @@ def _(Counter, Dice, Sequence, permutations, product):
             """
             contents = []
             for k, v in kwargs.items():
-                contents.extend([k]*v)
+                contents.extend([k] * v)
             return cls(contents)
 
         def _to_sorted_key(self, tup: Sequence[str]) -> str:
@@ -735,7 +785,9 @@ def _(Counter, Dice, Sequence, permutations, product):
             """
             return "".join(sorted(tup))
 
-        def take(self, n: int = 1, replace: bool = False, ordered: bool = False) -> "Dice[str]":
+        def take(
+            self, n: int = 1, replace: bool = False, ordered: bool = False
+        ) -> "Dice[str]":
             """
             Calculate the distribution of drawing items from the vase.
 
@@ -763,7 +815,6 @@ def _(Any, Dice, Hashable, Sequence, Weight, cast):
 
     from functools import singledispatch
 
-
     @singledispatch
     def p(expression: object, given: object = None) -> Any:
         """
@@ -775,11 +826,9 @@ def _(Any, Dice, Hashable, Sequence, Weight, cast):
         """
         raise TypeError("p expects a Dice, DAG node, or DAG event")
 
-
     @p.register(Dice)
     def _p_dice(expression: "Dice[Any]", given: object = None) -> Any:
         return expression.probs.get(True, 0)
-
 
     def exp(dice: "Dice[Weight]") -> Weight:
         """
@@ -793,7 +842,6 @@ def _(Any, Dice, Hashable, Sequence, Weight, cast):
         """
         return sum(i * p for i, p in dice.probs.items())
 
-
     def var(dice: "Dice[Weight]") -> Weight:
         """
         Calculates the variance of a dice.
@@ -806,7 +854,9 @@ def _(Any, Dice, Hashable, Sequence, Weight, cast):
         """
         return sum(p * (i - exp(dice)) ** 2 for i, p in dice.probs.items())
 
-    def mix[T: Hashable](*dice: "Dice[T]", weights: Sequence[Weight] | None = None) -> "Dice[T]":
+    def mix[T: Hashable](
+        *dice: "Dice[T]", weights: Sequence[Weight] | None = None
+    ) -> "Dice[T]":
         """
         Create a weighted mixture of dice.
 
@@ -840,12 +890,12 @@ def _(Any, Dice, Hashable, Sequence, Weight, cast):
                 new_probs[outcome] = new_probs.get(outcome, 0) + contribution
         return Dice(new_probs)
 
-
     def _slice_limit(length: int, stop: int) -> int:
         return len(range(length)[:stop])
 
-
-    def _threshold_probabilities[T: Hashable](die: "Dice[T]", thresholds: Sequence[T]) -> dict[T, Weight]:
+    def _threshold_probabilities[T: Hashable](
+        die: "Dice[T]", thresholds: Sequence[T]
+    ) -> dict[T, Weight]:
         """
         Return P(die >= threshold) for each threshold.
         """
@@ -855,15 +905,18 @@ def _(Any, Dice, Hashable, Sequence, Weight, cast):
         item_index = 0
 
         for threshold in thresholds:
-            while item_index < len(items) and items[item_index][0] >= cast(Any, threshold):
+            while item_index < len(items) and items[item_index][0] >= cast(
+                Any, threshold
+            ):
                 cumulative += items[item_index][1]
                 item_index += 1
             probabilities[threshold] = cumulative
 
         return probabilities
 
-
-    def ordered[T: Hashable](*dice_in: "Dice[T]", k: int | None = None) -> list["Dice[T]"]:
+    def ordered[T: Hashable](
+        *dice_in: "Dice[T]", k: int | None = None
+    ) -> list["Dice[T]"]:
         """
         Return dice that represent order statistics. Highest first.
 
@@ -884,11 +937,13 @@ def _(Any, Dice, Hashable, Sequence, Weight, cast):
         if n_outputs == 0:
             return []
 
-        thresholds = sorted(cast(list[Any], list({outcome for die in dice_in for outcome in die.probs})), reverse=True)
-        probabilities = [
-            _threshold_probabilities(die, thresholds)
-            for die in dice_in
-        ]
+        thresholds = sorted(
+            cast(
+                list[Any], list({outcome for die in dice_in for outcome in die.probs})
+            ),
+            reverse=True,
+        )
+        probabilities = [_threshold_probabilities(die, thresholds) for die in dice_in]
 
         # Seed with int 0/1 (not 0.0/1.0) so exact Fraction probabilities stay exact;
         # the float path is unaffected (int * float == float * float).
