@@ -7,7 +7,7 @@ setup = "uv sync"
 
 # Launch the marimo server on the nbs/ notebook folder. Each workspace gets its
 # own port, and --headless keeps it non-interactive (no browser launch).
-run = "uv run marimo edit nbs --headless --port $CONDUCTOR_PORT"
+run = "uv run marimo edit nbs --headless --watch --port $CONDUCTOR_PORT"
 
 # Tidy generated build artifacts (dist/, __pycache__) before archiving.
 # Workspace-local and non-destructive.
