@@ -584,7 +584,7 @@ def _():
                     for k, v in self.probs.items()
                 ]
             )
-            return qplot(
+            chart = qplot(
                 df,
                 "i",
                 "p",
@@ -595,6 +595,8 @@ def _():
                 height=120,
                 theme="default",
             )
+            chart.encoding.x.title = None
+            return chart
 
         def cdf_chart(self) -> Any:
             """
@@ -609,7 +611,7 @@ def _():
                 cumulative += probability
                 rows.append({"i": _plot_value(outcome), "p": _plot_value(cumulative)})
             df = pd.DataFrame(rows)
-            return qplot(
+            chart = qplot(
                 df,
                 "i",
                 "p",
@@ -620,6 +622,8 @@ def _():
                 height=120,
                 theme="default",
             )
+            chart.encoding.x.title = None
+            return chart
 
         def ordered(self, n: int, k: int | None = None) -> list["Dice[T]"]:
             """
