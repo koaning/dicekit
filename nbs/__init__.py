@@ -718,6 +718,15 @@ def _():
         def __len__(self) -> int:
             return len(self.probs)
 
+        def __getitem__(self, outcome: T) -> Weight:
+            """
+            Return the probability of a single outcome.
+
+            Raises KeyError if the outcome is not a face of this dice, matching
+            dict indexing. Use `.probs.get(outcome, 0)` for a zero default.
+            """
+            return self.probs[outcome]
+
     return (
         Any,
         Callable,

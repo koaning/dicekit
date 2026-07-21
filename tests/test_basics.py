@@ -57,6 +57,13 @@ def test_dice_creation():
     assert custom.probs[1] == 0.5
 
 
+def test_dice_getitem():
+    d6 = Dice.from_sides(6)
+    assert d6[1] == pytest.approx(1 / 6)
+    with pytest.raises(KeyError):
+        d6[7]
+
+
 def test_dice_from_numbers():
     dice = Dice.from_numbers(1, 1, 2)
 
