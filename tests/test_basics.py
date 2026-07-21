@@ -2,7 +2,7 @@ import pytest
 from fractions import Fraction
 from itertools import product
 from statistics import NormalDist
-from dicekit import Dice, Vase, p, exp, mix, var, ordered
+from dicekit import Dice, Vase, p, exp, mix, var, ordered, model
 
 
 def brute_force_ordered(*dice_in):
@@ -425,3 +425,51 @@ def test_dice_ordered_k_matches_prefix(k):
 
     assert len(first_two) == k
     assert_dice_probs_close(first_two, all_ordered[:k])
+
+
+# --- a Dice is a model variable ---------------------------------------------
+
+
+def test_bare_dice_in_model_is_a_variable():
+    # Inside a model, a bare Dice registers as a variable and captures its name.
+    with model() as m:
+        car = Dice.from_numbers(1, 2, 3)
+        pick = Dice.from_numbers(1, 2, 3)
+
+    assert isinstance(car, Dice)              # a variable IS a Dice
+    assert car._world is m                    # ...bound to the model
+    assert [s._name for s in m.sources] == ["car", "pick"]
+    # its marginal is a plain Dice usable by the core helpers
+    assert p(car).probs[1] == pytest.approx(1 / 3)
+
+
+def test_standalone_dice_semantics_unchanged():
+    # Outside a model, operators keep independent-product semantics.
+    d = Dice.from_sides(6)
+    total = d + d
+    assert d._world is None
+    assert min(total.probs) == 2 and max(total.probs) == 12   # independent sum
+    assert len(total.probs) == 11
+    # d * 2 is the independent two-roll sum, not the same die doubled
+    assert set((d * 2).probs) == set(total.probs)
+
+
+def test_dice_bayes_posterior_in_model():
+    with model():
+        disease = Dice({"present": 0.01, "absent": 0.99})
+        test = Dice.from_function(
+            lambda d: {"positive": 0.90, "negative": 0.10}
+            if d == "present"
+            else {"positive": 0.05, "negative": 0.95},
+            parents=[disease],
+        )
+
+    assert p(disease == "present", given=test == "positive") == pytest.approx(0.1538, abs=1e-4)
+    assert p(test == "positive") == pytest.approx(0.0585, abs=1e-4)
+
+
+def test_variable_rejects_missing_parents():
+    with model():
+        # A dependent variable needs parents; a root is a bare Dice.
+        with pytest.raises(TypeError):
+            Dice.from_function(lambda: Dice.from_numbers(1, 2))

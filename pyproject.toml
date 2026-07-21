@@ -25,7 +25,10 @@ classifiers = [
 ]
 
 dependencies = [
-    "hastyplot", "pandas", "marimo"
+    "hastyplot",
+    "pandas",
+    "marimo",
+    "wigglystuff>=0.5.20",
 ]
 
 [dependency-groups]

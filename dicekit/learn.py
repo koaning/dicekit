@@ -272,3 +272,9 @@ def _p_node(expression: "Node", given: object = None) -> object:
 @p.register(Event)
 def _p_event(expression: "Event", given: object = None) -> object:
     return expression.node.dag.query(expression, given=given)
+
+
+# The puzzle API now lives in core dicekit: a bare `Dice` created inside
+# `model()` is itself a variable, and `Dice.from_function(fn, parents=[...])`
+# adds a dependent one. Re-export the model helpers for convenience.
+from dicekit import World, model  # noqa: F401

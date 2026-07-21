@@ -36,7 +36,7 @@ def _():
     return (partial,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     ## Export
 
@@ -312,7 +312,13 @@ def _():
     def _p_event(expression: "Event", given: object = None) -> object:
         return expression.node.dag.query(expression, given=given)
 
-    return DAG, p
+
+    # The puzzle API now lives in core dicekit: a bare `Dice` created inside
+    # `model()` is itself a variable, and `Dice.from_function(fn, parents=[...])`
+    # adds a dependent one. Re-export the model helpers for convenience.
+    from dicekit import World, model  # noqa: F401
+
+    return DAG, Dice, model, p
 
 
 @app.cell
@@ -383,6 +389,30 @@ def _(p, test_1, test_2):
 @app.cell
 def _(p, test_1, test_2):
     p(test_1 == "positive", given=test_2 == "positive")
+    return
+
+
+@app.cell
+def _(Dice, model):
+    # from dicekit import Dice, model, p
+
+    with model() as m:
+        car    = Dice.from_numbers(1, 2, 3)              # bare Dice == a root variable
+        pick   = Dice.from_numbers(1, 2, 3)
+        opened = Dice.from_function(                      # only dependence needs a constructor
+            lambda c, g: Dice.from_numbers(*[d for d in (1,2,3) if d != c and d != g]),
+            parents=[car, pick],                         # explicit list, per your preference
+        )
+        switch = Dice.from_numbers(True, False)
+        win    = (switch & (car != pick)) | (~switch & (car == pick))
+
+
+    m.show(given=(win == 0))
+    return
+
+
+@app.cell
+def _():
     return
 
 
