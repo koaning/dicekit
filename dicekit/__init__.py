@@ -114,8 +114,10 @@ function persist(extra) {
 
 function redraw() {
     bars.attr("y", (i) => y(probs[i])).attr("height", (i) => ih - y(probs[i]))
-        // an asserted belief shows in the bar color
-        .attr("fill", touched ? "#ff725c" : "#4269d0");
+        // color signals *mode*: static charts stay black (like plain
+        // prob charts), a node in edit mode turns blue; an asserted
+        // belief is indicated by its `reset` link, not a color
+        .attr("fill", editing ? "#4269d0" : "currentColor");
     labels.attr("y", (i) => Math.max(9, y(probs[i]) - 3))
         .text((i) => probs[i].toFixed(2));
 }
@@ -157,15 +159,18 @@ function commit() {
 function reset() {
     probs = original.slice();
     touched = false;
+    // in a graph, reset is also the way *out* of edit mode: it withdraws
+    // the belief and hands the node back to the live flow. A separate
+    // "done" reads as that but would keep the belief pinned — confusing.
+    if (chrome === "belief") editing = false;
     redraw();
     commit();
 }
 
-// control links, laid out right-to-left in the top corner
+// control links: a live node offers `edit`, an editing node only `reset`
 const controls = [];
-if (chrome === "belief") {
-    controls.push({label: editing ? "done" : "edit", act: () => persist({editing: !editing})});
-    if (touched) controls.push({label: "reset", act: reset});
+if (chrome === "belief" && !editing) {
+    controls.push({label: "edit", act: () => persist({editing: true})});
 } else {
     controls.push({label: "reset", act: reset});
 }
@@ -223,6 +228,7 @@ class Dice[T: Hashable]:
         self._name: str | None = None
         self._lazy = False
         self._probs_version = -1
+        self._live_plot: Any = None
 
         world = _active_world.get()
         if world is not None:
@@ -526,15 +532,40 @@ class Dice[T: Hashable]:
         total_prob = sum(new_probs.values())
         return Dice._raw({k: v / total_prob for k, v in new_probs.items()})
 
+    def _live_chart(self) -> Any:
+        """This variable's wired belief chart — the same node ``World.show``
+        renders, created once and reused so repeated displays share one
+        widget (and one belief listener) instead of stacking them up.
+        """
+        assert self._world is not None
+        if self._live_plot is None:
+            [(_, plot, _)] = self._world._belief_entries(nodes=[self])
+            self._live_plot = plot
+        return self._live_plot
+
+    def _display_(self) -> Any:
+        """Render for marimo, which prefers ``_display_`` over mimebundles.
+
+        Returning the *widget object* (rather than its mimebundle) lets
+        marimo wrap it via ``mo.ui.anywidget``, which keeps the comm live —
+        a mimebundle renders as a static snapshot. A model variable
+        displays as its live belief chart: it repaints when the model's
+        beliefs change (e.g. drags in :meth:`World.show`) and carries its
+        own ``edit`` toggle. A standalone dice displays its pmf chart.
+        """
+        if self._world is not None:
+            return self._live_chart()
+        return self.prob_chart()
+
     def _repr_mimebundle_(self, **kwargs: Any) -> Any:
         """
         Render the dice as a live Observable Plot widget in notebooks.
 
-        Delegates to :meth:`prob_chart`, so a bare ``Dice`` displays as its
-        probability mass function (an ``ObservablePlot`` anywidget) rather
-        than static HTML.
+        Jupyter's display path (marimo prefers :meth:`_display_`): the same
+        live belief chart for a model variable, the pmf chart for a
+        standalone dice.
         """
-        return self.prob_chart()._repr_mimebundle_(**kwargs)
+        return self._display_()._repr_mimebundle_(**kwargs)
 
     def prob_chart(self) -> Any:
         """
@@ -1024,6 +1055,10 @@ class World:
             self._beliefs.clear()
             self._belief_changed(None)
 
+    def _display_(self) -> Any:
+        # a bare `m` in a marimo cell renders the interactive graph
+        return self.show()
+
     def _belief_changed(self, node: "Dice[Any] | None") -> None:
         self._belief_version += 1
         for listener in list(self._belief_listeners):
@@ -1104,6 +1139,7 @@ class World:
         given: "Dice[Any] | None" = None,
         soft: "Mapping[Dice[Any], Mapping[Any, Weight]] | None" = None,
         skip_ids: "set[int] | frozenset[int]" = frozenset(),
+        nodes: "Sequence[Dice[Any]] | None" = None,
     ) -> "list[tuple[Dice[Any], Any, list[Any]]]":
         """Build one interactive belief chart per variable and wire it up.
 
@@ -1113,7 +1149,7 @@ class World:
         """
         soft = dict(soft or {})
         entries: "list[tuple[Dice[Any], Any, list[Any]]]" = []
-        for node in [*self.sources, *self.derived]:
+        for node in [*self.sources, *self.derived] if nodes is None else list(nodes):
             if id(node) in skip_ids:
                 continue
             posterior = self.query(node, given, soft)
@@ -1192,11 +1228,13 @@ class World:
         labelled with its Python name, with an arrow for every dependency,
         via wigglystuff's ``WidgetDAG``.
 
-        Every node is interactive by default: click ``edit`` on any node
-        and drag its bars to assert a soft belief on that variable
-        (:meth:`Dice.believe`) right in the graph — every other node's
-        posterior repaints in place, parents included, and ``reset``
-        withdraws the belief (:meth:`Dice.forget`). The update loop runs
+        Every node is interactive by default, with two states: *live*
+        (black — it flows with the model and repaints as beliefs change)
+        and *editing* (blue — click ``edit``, then drag its bars to assert
+        a soft belief on that variable, :meth:`Dice.believe`). Every other
+        node's posterior repaints in place, parents included. ``reset`` is
+        the one way back: it withdraws the belief (:meth:`Dice.forget`)
+        and returns the node to the live flow. The update loop runs
         through the widgets' synced state, not notebook re-runs, so
         ``m.show()`` is the whole line: no editor cells, no evidence
         dicts. Programmatic :meth:`Dice.believe` calls repaint the graph

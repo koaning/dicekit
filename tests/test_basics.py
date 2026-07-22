@@ -591,3 +591,19 @@ def test_programmatic_believe_repaints_wired_widgets():
     check.believe({"positive": 1})
     pushed = dict(zip(disease_outcomes, disease_plot.variables["weights"]))
     assert pushed["present"] == pytest.approx(0.1538, abs=1e-4)
+
+
+def test_displayed_model_variable_is_live():
+    # a model variable displays as one wired chart (reused across renders)
+    # that repaints when the model's beliefs change
+    _, disease, (check,) = _clinic()
+    plot = disease._display_()
+    assert plot is disease._display_()
+
+    check.believe({"positive": 1})
+    pushed = dict(zip(plot.variables["faces"], plot.variables["weights"]))
+    assert pushed["present"] == pytest.approx(0.1538, abs=1e-4)
+
+    # a standalone dice still displays its plain pmf chart
+    standalone = Dice.from_sides(6)
+    assert standalone._display_().variables["data"][0]["p"] == pytest.approx(1 / 6)

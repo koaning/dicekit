@@ -427,6 +427,186 @@ def _(disease_v, p):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Looking inside: the factor graph
+
+    The model above is a Bayes net, and its joint factorizes as
+    $P(\text{disease}) \cdot \prod_i P(\text{test}_i \mid \text{disease})$.
+    The squares below are exactly those factors — the prior and one CPT
+    heatmap per test — drawn between the variables they connect. A pinned
+    belief is *just one more (unary) factor* plugged into its variable:
+    drag a node in the graph above (or here — these charts are live too)
+    and watch its belief factor switch on; `reset` and it vanishes.
+    """)
+    return
+
+
+@app.cell
+def _(clinic, mo):
+    # factor-graph view (prototype, notebook-only): reuses show()'s private
+    # wiring hooks on purpose — promote into the package once it feels right.
+    from itertools import product as _product
+
+    from wigglystuff import ObservablePlot as _ObservablePlot
+    from wigglystuff import WidgetDAG as _WidgetDAG
+
+    _CPT_JS = """Plot.plot({
+        width, height,
+        marginLeft: 56, marginBottom: 26,
+        x: {label: null}, y: {label: null},
+        color: {domain: [0, 1], scheme: "blues"},
+        marks: [
+            Plot.cell(data, {x: "out", y: "given", fill: "p"}),
+            Plot.text(data, {x: "out", y: "given",
+                text: (d) => d.p.toFixed(2),
+                fill: (d) => (d.p > 0.55 ? "white" : "black")}),
+        ],
+    })"""
+
+    _BELIEF_JS = """
+    if (!active) {
+        const div = document.createElement("div");
+        div.style.cssText = "width:" + width + "px;height:" + height + "px;" +
+            "display:flex;align-items:center;justify-content:center;" +
+            "color:#bbb;font:10px sans-serif;border:1px dashed #ccc;border-radius:4px";
+        div.textContent = "no belief";
+        return div;
+    }
+    return Plot.plot({
+        width, height,
+        marginLeft: 36, marginBottom: 22,
+        y: {domain: [0, 1], label: null}, x: {label: null},
+        marks: [Plot.barY(data, {x: "i", y: "p", fill: "#ff725c"}), Plot.ruleY([0])],
+    });
+    """
+
+    def _cpt_chart(node):
+        # the conditional P(node | parents) as a heatmap: one row per parent
+        # assignment, one column per outcome. CPTs are the model, so static.
+        rows = []
+        for values in _product(*[list(parent.probs) for parent in node._parents]):
+            dist = node._fn(*values)
+            dist = dist.probs if hasattr(dist, "probs") else dist
+            total = sum(dist.values())
+            for out, weight in dist.items():
+                rows.append({
+                    "given": " · ".join(map(str, values)),
+                    "out": str(out),
+                    "p": weight / total,
+                })
+        return _ObservablePlot(_CPT_JS, variables={"data": rows}, width=180, height=100)
+
+    def _prior_chart(node):
+        rows = [{"given": "p", "out": str(out), "p": w} for out, w in node.probs.items()]
+        return _ObservablePlot(_CPT_JS, variables={"data": rows}, width=180, height=80)
+
+    _entries = clinic._belief_entries()
+    _var_names = {id(node): (node._name or f"var{i}") for i, node in enumerate(clinic.sources)}
+
+    _fg_nodes = {}
+    _fg_edges = []
+    for _node, _plot, _outs in _entries:
+        _fg_nodes[_var_names[id(_node)]] = mo.ui.anywidget(_plot)
+
+    _slots = {}
+    for _node in clinic.sources:
+        _label = _var_names[id(_node)]
+        if _node._parents:
+            _factor = f"p({_label}|…)"
+            _fg_nodes[_factor] = _cpt_chart(_node)
+            for _parent in _node._parents:
+                _fg_edges.append((_var_names[id(_parent)], _factor))
+        else:
+            _factor = f"p({_label})"
+            _fg_nodes[_factor] = _prior_chart(_node)
+        _fg_edges.append((_factor, _label))
+
+        _slot = _ObservablePlot(_BELIEF_JS, variables={"data": [], "active": False}, width=150, height=90)
+        _slots[id(_node)] = _slot
+        _fg_nodes[f"belief({_label})"] = _slot
+        _fg_edges.append((f"belief({_label})", _label))
+
+    def _refresh_slots(_origin=None):
+        for _n in clinic.sources:
+            _belief = clinic._beliefs.get(_n)
+            _total = sum(_belief.values()) if _belief else 1
+            _slots[id(_n)].variables = {
+                **_slots[id(_n)].variables,
+                "active": _belief is not None,
+                "data": [{"i": str(k), "p": v / _total} for k, v in (_belief or {}).items()],
+            }
+
+    _refresh_slots()
+    # re-running this cell stacks a stale listener; harmless for a prototype
+    clinic._belief_listeners.append(_refresh_slots)
+    _WidgetDAG(_fg_nodes, _fg_edges)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### ...and the joint, atom by atom
+
+    Under the hood nothing but this table exists: $2 \cdot 2^3 = 16$ atoms,
+    one per full assignment, weighted by the product of the factors above.
+    Grey bars are the prior joint; blue bars are the joint under the current
+    beliefs. Conditioning is *literally* reweighting this table: pin a test
+    positive above and watch the `−` atoms die and the `sick` atoms grow
+    (square-root scale, because the healthy-all-negative atom dominates).
+    """)
+    return
+
+
+@app.cell
+def _(clinic):
+    from dicekit import _jeffrey_condition as _reweight
+    from wigglystuff import ObservablePlot as _AtomsPlot
+
+    _ATOMS_JS = """Plot.plot({
+        width, height,
+        marginLeft: 44, marginBottom: 66,
+        x: {label: null, tickRotate: -45, domain: data.map((d) => d.label)},
+        y: {label: "p(atom)", type: "sqrt", grid: true},
+        marks: [
+            Plot.barY(data, {x: "label", y: "prior", fill: "#d5d5d5"}),
+            Plot.barY(data, {x: "label", y: "post", fill: "#4269d0", opacity: 0.8}),
+            Plot.ruleY([0]),
+        ],
+    })"""
+
+    _short = {"present": "sick", "absent": "ok", "positive": "+", "negative": "−"}
+
+    _base_rows = clinic.joint()
+    _prior_total = sum(w for _, w in _base_rows)
+    _labels = [
+        " ".join(_short.get(a[s], str(a[s])) for s in clinic.sources)
+        for a, _ in _base_rows
+    ]
+    _priors = [w / _prior_total for _, w in _base_rows]
+
+    _atoms = _AtomsPlot(_ATOMS_JS, variables={"data": []}, width=640, height=230)
+
+    def _refresh_atoms(_origin=None):
+        _rows = _reweight(list(_base_rows), dict(clinic._beliefs))
+        _t = sum(w for _, w in _rows) or 1
+        _post = {id(a): w / _t for a, w in _rows}
+        _atoms.variables = {
+            **_atoms.variables,
+            "data": [
+                {"label": _labels[_i], "prior": _priors[_i], "post": _post.get(id(_a), 0)}
+                for _i, (_a, _w) in enumerate(_base_rows)
+            ],
+        }
+
+    _refresh_atoms()
+    clinic._belief_listeners.append(_refresh_atoms)
+    _atoms
+    return
+
+
 @app.cell
 def _(p, test_1, test_2):
     p(test_1, given=test_2 == "positive")
@@ -460,6 +640,9 @@ def _(Dice, model):
 
 @app.cell
 def _(car):
+    # a model variable displays as a live node: it repaints when beliefs
+    # change (drag in the graph above) and has its own edit toggle.
+    # (`car.marginal()` would be a static snapshot Dice instead.)
     car.marginal()
     return
 
