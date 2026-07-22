@@ -593,6 +593,134 @@ def test_programmatic_believe_repaints_wired_widgets():
     assert pushed["present"] == pytest.approx(0.1538, abs=1e-4)
 
 
+# --- the factor engine matches exhaustive enumeration ----------------------
+
+
+def _oracle(m, target, given=None):
+    """Reference posterior via the exhaustive joint (the old engine)."""
+    from dicekit import _jeffrey_condition
+
+    rows = m.joint()
+    if given is not None:
+        rows = [(a, w) for a, w in rows if given._eval(a)]
+    rows = _jeffrey_condition(rows, dict(m._beliefs))
+    out = {}
+    for assignment, weight in rows:
+        value = target._eval(assignment)
+        out[value] = out.get(value, 0) + weight
+    total = sum(out.values())
+    return {value: weight / total for value, weight in out.items()}
+
+
+def _assert_dist_close(left, right, tol=1e-8):
+    for value in {*left, *right}:
+        assert left.get(value, 0) == pytest.approx(right.get(value, 0), abs=tol)
+
+
+def _random_model(rng):
+    with model() as m:
+        nodes = [
+            Dice({outcome: rng.random() + 0.1 for outcome in range(rng.randint(2, 3))})
+            for _ in range(rng.randint(2, 3))
+        ]
+        for _ in range(rng.randint(1, 2)):
+            parents = rng.sample(nodes, k=min(len(nodes), rng.randint(1, 2)))
+            outcomes = range(rng.randint(2, 3))
+            cpt = {
+                combo: {outcome: rng.random() + 0.05 for outcome in outcomes}
+                for combo in product(*[parent._support() for parent in parents])
+            }
+            nodes.append(Dice.from_function(lambda *vals, cpt=cpt: cpt[vals], parents=parents))
+        if rng.random() < 0.5:
+            # a dependent hanging off a *derived* parent
+            combined = nodes[0] + nodes[1]
+            cpt2 = {value: {0: rng.random() + 0.1, 1: rng.random() + 0.1} for value in combined._support()}
+            nodes.append(Dice.from_function(lambda t, cpt2=cpt2: cpt2[t], parents=[combined]))
+        derived = nodes[0] + nodes[-1]
+    return m, nodes, derived
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_factor_engine_matches_enumeration(seed):
+    import random as _random
+
+    rng = _random.Random(seed)
+    m, nodes, derived = _random_model(rng)
+    targets = [*nodes, derived]
+
+    for target in targets:  # prior marginals
+        _assert_dist_close(m.query(target).probs, _oracle(m, target))
+
+    predicate = nodes[0] == nodes[0]._support()[0]  # hard evidence
+    for target in targets:
+        _assert_dist_close(m.query(target, given=predicate).probs, _oracle(m, target, given=predicate))
+
+    first, second = nodes[1], nodes[-1]  # soft + hard beliefs, jointly
+    first.believe({value: rng.random() + 0.1 for value in first._support()})
+    second.believe({second._support()[0]: 1})
+    for target in targets:
+        _assert_dist_close(m.query(target).probs, _oracle(m, target), tol=1e-6)
+
+
+def test_factor_engine_scales_past_enumeration():
+    import time as _time
+
+    started = _time.time()
+    # 200-test star: the enumerator's joint would have 2**201 rows
+    with model() as star:
+        disease = Dice({"present": 0.01, "absent": 0.99})
+        checks = [
+            Dice.from_function(
+                lambda d: {"positive": 0.90, "negative": 0.10}
+                if d == "present"
+                else {"positive": 0.05, "negative": 0.95},
+                parents=[disease],
+            )
+            for _ in range(200)
+        ]
+    for check in checks[:3]:
+        check.believe({"positive": 1})
+    odds = (0.01 / 0.99) * 18.0**3
+    assert star.query(disease).probs["present"] == pytest.approx(odds / (1 + odds), rel=1e-6)
+
+    # 60-link noisy-copy chain: P(x0=T | x60=T) = (1 + (1-2*eps)**60) / 2
+    with model() as chain:
+        x0 = Dice({True: 0.5, False: 0.5})
+        node = x0
+        for _ in range(60):
+            node = Dice.from_function(lambda v: {v: 0.98, not v: 0.02}, parents=[node])
+    node.believe({True: 1})
+    assert chain.query(x0).probs[True] == pytest.approx((1 + 0.96**60) / 2, rel=1e-9)
+    assert _time.time() - started < 10
+
+
+def test_posteriors_calibration_matches_per_node_queries():
+    # _posteriors (one sum-product calibration, what show() repaints use)
+    # must agree with query() node by node — on a tree (clinic) and on a
+    # loopy factor graph (Monty: car and pick share two factors), where it
+    # falls back to elimination.
+    m, disease, (check_1, check_2) = _clinic(tests=2)
+    check_1.believe({"positive": 0.7, "negative": 0.3})
+    posteriors = m._posteriors()
+    for node in m.sources:
+        _assert_dist_close(posteriors[id(node)].probs, m.query(node).probs, tol=1e-9)
+    assert m._last_messages  # tree: messages captured for the visual layer
+
+    with model() as monty:
+        car = Dice.from_numbers(1, 2, 3)
+        pick = Dice.from_numbers(1, 2, 3)
+        opened = Dice.from_function(
+            lambda c, g: Dice.from_numbers(*[d for d in (1, 2, 3) if d != c and d != g]),
+            parents=[car, pick],
+        )
+        switch = Dice.from_numbers(True, False)
+        win = (switch & (car != pick)) | (~switch & (car == pick))
+    assert p(win, given=switch) == pytest.approx(2 / 3)
+    posteriors = monty._posteriors()
+    for node in [*monty.sources, *monty.derived]:
+        _assert_dist_close(posteriors[id(node)].probs, monty.query(node).probs, tol=1e-9)
+
+
 def test_displayed_model_variable_is_live():
     # a model variable displays as one wired chart (reused across renders)
     # that repaints when the model's beliefs change

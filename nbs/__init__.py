@@ -647,6 +647,9 @@ def _():
             self._lazy = False
             self._probs_version = -1
             self._live_plot: Any = None
+            self._dist_cache: "dict[tuple[Any, ...], Dice[Any]]" = {}
+            self._support_cache: "tuple[Any, ...] | None" = None
+            self._node_factor: "Factor | None" = None
 
             world = _active_world.get()
             if world is not None:
@@ -686,6 +689,10 @@ def _():
             obj._name = name
             obj._lazy = probs is None
             obj._probs_version = -1
+            obj._live_plot = None
+            obj._dist_cache = {}
+            obj._support_cache = None
+            obj._node_factor = None
             return obj
 
         @classmethod
@@ -1142,11 +1149,81 @@ def _():
             # The conditional distribution of this source given an assignment to
             # its parents. A root's distribution is simply itself. Parents are
             # evaluated, not looked up: a *derived* parent (e.g. ``a + b``) is
-            # not a column of the joint, only sources are.
+            # not a column of the joint, only sources are. Results are memoized
+            # per parent-value tuple; `fn` is treated as deterministic.
             if self._fn is None:
                 return self
-            values = [parent._eval(assignment) for parent in self._parents]
-            return _coerce_dice(self._fn(*values))
+            values = tuple(parent._eval(assignment) for parent in self._parents)
+            if values not in self._dist_cache:
+                self._dist_cache[values] = _coerce_dice(self._fn(*values))
+            return self._dist_cache[values]
+
+        def _leaves(self) -> "tuple[Dice[Any], ...]":
+            # The source variables (columns of the joint) this expression is
+            # built from — itself, if it *is* a source. Order-stable, deduped
+            # by identity (a Dice's `==` builds an expression, so membership
+            # tests on lists/tuples of dice must never be used).
+            if self._op is None:
+                return (self,)
+            found: "list[Dice[Any]]" = []
+            seen: set[int] = set()
+
+            def walk(node: "Dice[Any]") -> None:
+                for operand in node._operands:
+                    if not isinstance(operand, Dice):
+                        continue
+                    if operand._op is None:
+                        if id(operand) not in seen:
+                            seen.add(id(operand))
+                            found.append(operand)
+                    else:
+                        walk(operand)
+
+            walk(self)
+            return tuple(found)
+
+        def _support(self) -> "tuple[Any, ...]":
+            # Every outcome this variable can take, order-stable. For a derived
+            # expression this ranges over the product of its operands' supports
+            # — a superset when operands are correlated, which is harmless
+            # (impossible values simply never carry mass).
+            if self._support_cache is None:
+                if self._op is not None:
+                    combos = product(
+                        *[op._support() if isinstance(op, Dice) else (op,) for op in self._operands]
+                    )
+                    self._support_cache = tuple(dict.fromkeys(self._op(*combo) for combo in combos))
+                elif self._fn is not None:
+                    factor = self._family_factor()
+                    self._support_cache = tuple(dict.fromkeys(key[-1] for key in factor.table))
+                else:
+                    self._support_cache = tuple(cast("dict[Any, Weight]", self._probs))
+            return self._support_cache
+
+        def _prior_factor(self) -> "Factor":
+            # A root's prior as a unary factor.
+            if self._node_factor is None:
+                probs = cast("dict[Any, Weight]", self._probs)
+                self._node_factor = Factor((self,), {(value,): weight for value, weight in probs.items()})
+            return self._node_factor
+
+        def _family_factor(self) -> "Factor":
+            # ``P(self | parents)`` as a factor over ``(*parent leaves, self)``.
+            # Derived parents are folded in by evaluating them per leaf
+            # assignment, so factor variables are always sources. Cost is the
+            # product of the leaf supports — family-local, never joint-sized.
+            assert self._fn is not None
+            if self._node_factor is None:
+                leaves = tuple(
+                    dict.fromkeys(leaf for parent in self._parents for leaf in parent._leaves())
+                )
+                table: "dict[tuple[Any, ...], Weight]" = {}
+                for combo in product(*[leaf._support() for leaf in leaves]):
+                    assignment = dict(zip(leaves, combo))
+                    for value, weight in self._dist_for(assignment).probs.items():
+                        table[(*combo, value)] = weight
+                self._node_factor = Factor((*leaves, self), table)
+            return self._node_factor
 
         def _eval(self, assignment: "Mapping[Dice[Any], Any]") -> Any:
             # The value this variable takes under a full assignment to sources.
@@ -1383,6 +1460,330 @@ def _():
         return rows
 
 
+    # -- the factor-graph engine -------------------------------------------
+    # The model's joint is a *product of small tables*: one prior factor per
+    # root, one family factor per dependent. Inference multiplies and sums
+    # these out (variable elimination) instead of enumerating the joint, so
+    # cost grows with treewidth — how tangled the graph is — not with the
+    # number of variables. The exhaustive enumeration survives as
+    # ``World.joint()``: the reference oracle for tests and the data behind
+    # small-model teaching views. Messages for sum-product propagation (and a
+    # loopy schedule for high-treewidth models) can be layered on the same
+    # Factor type later without rework.
+
+    class Factor:
+        """A sparse weight table over a tuple of source variables.
+
+        Missing rows are zero, which keeps deterministic factors small, and
+        weights keep their exact types (Fractions in → Fractions out).
+        Variables are model-bound ``Dice``; because their ``==`` builds an
+        expression, all bookkeeping here is by identity (id-keyed), never by
+        list membership.
+        """
+
+        __slots__ = ("variables", "table")
+
+        def __init__(self, variables: "Sequence[Dice[Any]]", table: "Mapping[tuple[Any, ...], Weight]") -> None:
+            self.variables = tuple(variables)
+            self.table = dict(table)
+
+        def __mul__(self, other: "Factor") -> "Factor":
+            mine = {id(v) for v in self.variables}
+            shared = tuple(i for i, v in enumerate(other.variables) if id(v) in mine)
+            extra = tuple(i for i, v in enumerate(other.variables) if id(v) not in mine)
+            position = {id(v): i for i, v in enumerate(self.variables)}
+            shared_mine = tuple(position[id(other.variables[i])] for i in shared)
+
+            buckets: "defaultdict[tuple[Any, ...], list[tuple[tuple[Any, ...], Weight]]]" = defaultdict(list)
+            for key, weight in other.table.items():
+                buckets[tuple(key[i] for i in shared)].append((tuple(key[i] for i in extra), weight))
+
+            joined: "dict[tuple[Any, ...], Weight]" = {}
+            for key, weight in self.table.items():
+                match = tuple(key[i] for i in shared_mine)
+                for extra_key, other_weight in buckets.get(match, ()):
+                    row = key + extra_key
+                    joined[row] = joined.get(row, 0) + weight * other_weight
+            return Factor(self.variables + tuple(other.variables[i] for i in extra), joined)
+
+        def sum_out(self, variable: "Dice[Any]") -> "Factor":
+            keep = [i for i, v in enumerate(self.variables) if v is not variable]
+            summed: "defaultdict[tuple[Any, ...], Weight]" = defaultdict(int)
+            for key, weight in self.table.items():
+                summed[tuple(key[i] for i in keep)] += weight
+            return Factor(tuple(self.variables[i] for i in keep), dict(summed))
+
+
+    def _eliminate(factors: "Sequence[Factor]", keep: "Sequence[Dice[Any]]") -> Factor:
+        """Multiply-and-sum-out every variable not in ``keep``.
+
+        The next variable is chosen greedily by *min-fill* (fewest edges its
+        elimination would add between its neighbors), the classic heuristic
+        that keeps intermediate tables near the treewidth bound. Variables
+        whose neighbors are already a clique — in particular leaves — are
+        picked immediately.
+        """
+        keep_ids = {id(v) for v in keep}
+        factors = list(factors)
+        while True:
+            variables: "dict[int, Dice[Any]]" = {}
+            neighbors: "defaultdict[int, set[int]]" = defaultdict(set)
+            for factor in factors:
+                for v in factor.variables:
+                    variables[id(v)] = v
+                    for u in factor.variables:
+                        if u is not v:
+                            neighbors[id(v)].add(id(u))
+            candidates = [vid for vid in variables if vid not in keep_ids]
+            if not candidates:
+                break
+
+            def fill(vid: int) -> "tuple[int, int]":
+                around = [n for n in neighbors[vid] if n in variables]
+                missing = sum(
+                    1
+                    for i, a in enumerate(around)
+                    for b in around[i + 1:]
+                    if b not in neighbors[a]
+                )
+                return (missing, len(around))
+
+            best = None
+            best_fill = None
+            for vid in sorted(candidates, key=lambda c: len(neighbors[c])):
+                if len(neighbors[vid]) <= 1:
+                    best = vid  # a (near-)leaf never adds edges
+                    break
+                score = fill(vid)
+                if best_fill is None or score < best_fill:
+                    best, best_fill = vid, score
+                    if score[0] == 0:
+                        break
+            chosen = variables[cast(int, best)]
+
+            bucket = [f for f in factors if any(v is chosen for v in f.variables)]
+            rest = [f for f in factors if not any(v is chosen for v in f.variables)]
+            merged = bucket[0]
+            for factor in bucket[1:]:
+                merged = merged * factor
+            factors = rest + [merged.sum_out(chosen)]
+
+        result = factors[0]
+        for factor in factors[1:]:
+            result = result * factor
+        return result
+
+
+    def _indicator_factor(expr: "Dice[Any]", weight_fn: "Callable[[Any], Weight]") -> Factor:
+        """A factor over ``expr``'s source leaves weighing each assignment by
+        ``weight_fn(expr's value there)`` — how hard evidence and beliefs on
+        derived expressions enter the factor product. Cost is the product of
+        the leaf supports, i.e. genuinely wide expressions cost real treewidth.
+        """
+        leaves = expr._leaves()
+        table: "dict[tuple[Any, ...], Weight]" = {}
+        for combo in product(*[leaf._support() for leaf in leaves]):
+            weight = weight_fn(expr._eval(dict(zip(leaves, combo))))
+            if weight:
+                table[combo] = weight
+        return Factor(leaves, table)
+
+
+    def _marginal_of(factors: "Sequence[Factor]", node: "Dice[Any]") -> "dict[Any, Weight]":
+        """The (unnormalized) marginal of ``node`` under a factor product.
+
+        Sources marginalize directly; a derived expression is marginalized
+        onto its leaf set and then evaluated — it never becomes a column.
+        """
+        leaves = node._leaves()
+        joint = _eliminate(factors, leaves)
+        index = {id(v): i for i, v in enumerate(joint.variables)}
+        weights: "defaultdict[Any, Weight]" = defaultdict(int)
+        for key, weight in joint.table.items():
+            assignment = {leaf: key[index[id(leaf)]] for leaf in leaves}
+            weights[node._eval(assignment)] += weight
+        return dict(weights)
+
+
+    def _sum_product(
+        factors: "Sequence[Factor]",
+    ) -> "tuple[dict[int, dict[Any, Weight]], dict[tuple[Any, Any], dict[Any, Weight]]] | None":
+        """Two-pass sum-product over the factor graph, if it is a forest.
+
+        Returns ``(marginals, messages)``: unnormalized marginals for every
+        source variable (keyed by ``id``) from ONE calibration — the fast path
+        for "repaint every node" — and every edge message, the objects a
+        message-passing visualization draws. Nodes are ``("v", id(var))`` and
+        ``("f", index)``; a message key is ``(src, dst)``. Returns ``None``
+        when the factor graph has a cycle; callers fall back to variable
+        elimination (exact at treewidth cost). A loopy schedule — the same
+        messages iterated with damping — can reuse this structure later.
+        """
+        variables: "dict[int, Dice[Any]]" = {}
+        adjacency: "defaultdict[Any, list[Any]]" = defaultdict(list)
+        union: "dict[Any, Any]" = {}
+
+        def find(node: Any) -> Any:
+            while union[node] != node:
+                union[node] = union[union[node]]
+                node = union[node]
+            return node
+
+        for index, factor in enumerate(factors):
+            fnode = ("f", index)
+            union.setdefault(fnode, fnode)
+            adjacency[fnode]  # ensure isolated (constant) factors exist as nodes
+            for v in factor.variables:
+                vnode = ("v", id(v))
+                variables[id(v)] = v
+                union.setdefault(vnode, vnode)
+                root_f, root_v = find(fnode), find(vnode)
+                if root_f == root_v:
+                    return None  # a cycle: this graph is loopy
+                union[root_f] = root_v
+                adjacency[fnode].append(vnode)
+                adjacency[vnode].append(fnode)
+
+        messages: "dict[tuple[Any, Any], dict[Any, Weight]]" = {}
+
+        def compute(src: Any, dst: Any) -> "dict[Any, Weight]":
+            if src[0] == "v":
+                v = variables[src[1]]
+                out = {value: cast(Weight, 1) for value in v._support()}
+                for neighbor in adjacency[src]:
+                    if neighbor == dst:
+                        continue
+                    incoming = messages[(neighbor, src)]
+                    out = {value: weight * incoming.get(value, 0) for value, weight in out.items()}
+            else:
+                factor = factors[src[1]]
+                position = next(i for i, u in enumerate(factor.variables) if id(u) == dst[1])
+                incoming_by_index = [
+                    None if i == position else messages.get((("v", id(u)), src))
+                    for i, u in enumerate(factor.variables)
+                ]
+                summed: "defaultdict[Any, Weight]" = defaultdict(int)
+                for key, weight in factor.table.items():
+                    for i, incoming in enumerate(incoming_by_index):
+                        if incoming is not None:
+                            weight = weight * incoming.get(key[i], 0)
+                            if weight == 0:
+                                break
+                    summed[key[position]] += weight
+                out = dict(summed)
+            total = sum(out.values())
+            if total > 0:  # normalize so long chains cannot underflow
+                out = {value: weight / total for value, weight in out.items()}
+            return out
+
+        # strip leaves inward (collect), then unwind outward (distribute)
+        remaining = {node: len(neighbors) for node, neighbors in adjacency.items()}
+        stripped: set[Any] = set()
+        parent_of: "dict[Any, Any]" = {}
+        order: "list[Any]" = []
+        frontier = [node for node, count in remaining.items() if count <= 1]
+        while frontier:
+            node = frontier.pop()
+            if node in stripped:
+                continue
+            alive = [n for n in adjacency[node] if n not in stripped]
+            parent = alive[0] if alive else None
+            parent_of[node] = parent
+            stripped.add(node)
+            order.append(node)
+            if parent is not None:
+                messages[(node, parent)] = compute(node, parent)
+                remaining[parent] -= 1
+                if remaining[parent] <= 1:
+                    frontier.append(parent)
+        for node in reversed(order):
+            parent = parent_of[node]
+            if parent is not None:
+                messages[(parent, node)] = compute(parent, node)
+
+        marginals: "dict[int, dict[Any, Weight]]" = {}
+        for vid, v in variables.items():
+            out = {value: cast(Weight, 1) for value in v._support()}
+            for neighbor in adjacency[("v", vid)]:
+                incoming = messages[(neighbor, ("v", vid))]
+                out = {value: weight * incoming.get(value, 0) for value, weight in out.items()}
+            marginals[vid] = out
+        return marginals, messages
+
+
+    def _belief_marginal(factors: "Sequence[Factor]", node: "Dice[Any]") -> "dict[Any, Weight]":
+        # A single node's marginal, via one cheap calibration when the graph
+        # is a forest and the node is a source; elimination otherwise.
+        if node._op is None:
+            calibrated = _sum_product(factors)
+            if calibrated is not None:
+                return dict(calibrated[0].get(id(node), {}))
+        return _marginal_of(factors, node)
+
+
+    def _ipf_factors(
+        factors: "Sequence[Factor]",
+        beliefs: "Mapping[Dice[Any], Mapping[Any, Weight]]",
+        max_rounds: int = 100,
+        tol: float = 1e-9,
+    ) -> "list[Factor]":
+        """Belief adjustments as per-variable factors, fitted by IPF.
+
+        The factor-engine twin of :func:`_jeffrey_condition`: instead of
+        reweighting joint atoms, each believed variable gets a unary (or, for
+        a derived expression, leaf-indicator) adjustment factor, iterated to
+        the joint fixpoint — same semantics, but each pass costs an
+        elimination, not a joint scan. Target mass on unreachable outcomes is
+        dropped and the rest renormalized, per variable, as before.
+        """
+        if not beliefs:
+            return []
+        targets: "dict[Dice[Any], dict[Any, Weight]]" = {}
+        for node, dist in beliefs.items():
+            scale = sum(dist.values())
+            if scale <= 0:
+                raise ValueError("belief must have positive total weight")
+            targets[node] = {value: weight / scale for value, weight in dist.items()}
+        ratios: "dict[Dice[Any], dict[Any, Weight]]" = {
+            node: {value: 1 for value in node._support()} for node in targets
+        }
+
+        def adjustments() -> "list[Factor]":
+            built = []
+            for node, ratio in ratios.items():
+                if node._op is None:
+                    built.append(Factor((node,), {(v,): r for v, r in ratio.items() if r}))
+                else:
+                    built.append(_indicator_factor(node, lambda v, ratio=ratio: ratio.get(v, 0)))
+            return built
+
+        base = list(factors)
+        for _ in range(max_rounds):
+            deviation: Weight = 0
+            for node, target in targets.items():
+                marginal = _belief_marginal(base + adjustments(), node)
+                total = sum(marginal.values())
+                if total == 0:
+                    raise ValueError("evidence has zero probability")
+                reachable = {v: q for v, q in target.items() if marginal.get(v, 0) > 0}
+                reachable_total = sum(reachable.values())
+                if reachable_total == 0:
+                    raise ValueError("evidence has zero probability")
+                adjusted = {v: q / reachable_total for v, q in reachable.items()}
+                deviation = max(
+                    deviation,
+                    *[abs(marginal.get(v, 0) / total - adjusted.get(v, 0)) for v in {*marginal, *adjusted}],
+                )
+                ratio = ratios[node]
+                for v in list(ratio):
+                    mass = marginal.get(v, 0)
+                    if mass > 0:
+                        ratio[v] = ratio[v] * adjusted.get(v, 0) * total / mass
+            if deviation <= tol:
+                break
+        return adjustments()
+
+
     def _belief_plot(seed: "Dice[Any]", touched: bool = False) -> Any:
         """The interactive node chart for :meth:`World.show`.
 
@@ -1429,7 +1830,11 @@ def _():
         Yielded by ``with model() as m:``. Tracks the model's source variables
         (roots + dependents, in creation order so a child's parents are bound
         before it) and any named derived expressions, and answers marginal /
-        conditional queries by enumerating the joint.
+        conditional queries **by variable elimination over the model's
+        factors** — cost grows with treewidth (how tangled the graph is), not
+        with the number of variables, so tree-ish models scale to hundreds of
+        variables. The exhaustive enumeration survives as :meth:`joint`, the
+        reference oracle for tests and small-model teaching views.
 
         Also carries the model's mutable *beliefs*: soft evidence asserted via
         :meth:`Dice.believe` (or by dragging a node in :meth:`show`). Every
@@ -1440,6 +1845,8 @@ def _():
         def __init__(self) -> None:
             self.sources: "list[Dice[Any]]" = []
             self.derived: "list[Dice[Any]]" = []
+            self._factor_list: "list[Factor] | None" = None
+            self._factor_count = 0
             # Asserted beliefs (soft evidence) per variable — the world's
             # mutable state. Every query conditions on them; the version
             # counter invalidates the lazy `probs` caches, and listeners let
@@ -1483,6 +1890,13 @@ def _():
                 listener(node)
 
         def joint(self) -> "list[tuple[dict[Dice[Any], Any], Weight]]":
+            """The exhaustive weighted joint, one row per full assignment.
+
+            Exponential in the number of variables — kept as the reference
+            implementation (tests cross-check the factor engine against it)
+            and as the data behind small-model views like the atoms chart.
+            Inference itself goes through :meth:`_factors` + elimination.
+            """
             rows: "list[tuple[dict[Dice[Any], Any], Weight]]" = [({}, 1)]
             for source in self.sources:
                 expanded: "list[tuple[dict[Dice[Any], Any], Weight]]" = []
@@ -1491,6 +1905,58 @@ def _():
                         expanded.append(({**assignment, source: value}, weight * probability))
                 rows = expanded
             return rows
+
+        def _factors(self) -> "list[Factor]":
+            # One factor per source: priors for roots, families for dependents.
+            # Cached; rebuilt only if more variables were registered.
+            if self._factor_list is None or self._factor_count != len(self.sources):
+                token = _active_world.set(None)
+                try:
+                    self._factor_list = [
+                        source._family_factor() if source._fn is not None else source._prior_factor()
+                        for source in self.sources
+                    ]
+                finally:
+                    _active_world.reset(token)
+                self._factor_count = len(self.sources)
+            return list(self._factor_list)
+
+        def _posteriors(
+            self,
+            given: "Dice[Any] | None" = None,
+            evidence: "Mapping[Dice[Any], Mapping[Any, Weight]] | None" = None,
+        ) -> "dict[int, Dice[Any]]":
+            """Posterior marginals for every source and named derived variable,
+            keyed by ``id`` — what a full graph repaint needs. One sum-product
+            calibration covers all sources when the factor graph is a forest
+            (and stashes its messages on ``_last_messages``); loopy graphs and
+            derived expressions fall back to per-node elimination.
+            """
+            token = _active_world.set(None)
+            try:
+                factors = self._factors()
+                if given is not None:
+                    factors.append(_indicator_factor(given, lambda value: 1 if value else 0))
+                factors += _ipf_factors(factors, {**self._beliefs, **(evidence or {})})
+                calibrated = _sum_product(factors)
+                marginals = calibrated[0] if calibrated is not None else None
+                self._last_messages = calibrated[1] if calibrated is not None else None
+                result: "dict[int, Dice[Any]]" = {}
+                for node in [*self.sources, *self.derived]:
+                    if marginals is not None and node._op is None:
+                        weights = marginals.get(id(node), {})
+                    else:
+                        weights = _marginal_of(factors, node)
+                    if sum(weights.values()) == 0:
+                        raise ValueError("evidence has zero probability")
+                    order = {value: index for index, value in enumerate(node._support())}
+                    fallback = len(order)
+                    result[id(node)] = Dice._raw(
+                        {value: weights[value] for value in sorted(weights, key=lambda value: order.get(value, fallback))}
+                    )
+                return result
+            finally:
+                _active_world.reset(token)
 
         def query(
             self,
@@ -1513,21 +1979,32 @@ def _():
 
             Beliefs asserted on the world (:meth:`Dice.believe`) are always
             folded in; ``evidence`` overrides a belief on the same variable.
+
+            Runs on the factor engine: variable elimination over the model's
+            factors, plus an indicator factor for ``given`` and IPF-fitted
+            adjustment factors for the beliefs — exact, with cost bounded by
+            treewidth rather than the joint size.
             """
-            # Enumerate with the model deactivated, so dice built by conditional
+            # Work with the model deactivated, so dice built by conditional
             # functions (and the result itself) are not registered as variables.
             token = _active_world.set(None)
             try:
-                rows = self.joint()
+                factors = self._factors()
                 if given is not None:
-                    rows = [(a, w) for a, w in rows if given._eval(a)]
-                rows = _jeffrey_condition(rows, {**self._beliefs, **(evidence or {})})
-                weights: "defaultdict[Any, Weight]" = defaultdict(int)
-                for assignment, weight in rows:
-                    weights[target._eval(assignment)] += weight
+                    factors.append(_indicator_factor(given, lambda value: 1 if value else 0))
+                factors += _ipf_factors(factors, {**self._beliefs, **(evidence or {})})
+                weights = _marginal_of(factors, target)
                 if sum(weights.values()) == 0:
                     raise ValueError("evidence has zero probability")
-                return Dice._raw(dict(weights))
+                # canonical outcome order (the support's), so chart axes stay
+                # stable instead of following elimination order
+                order = {value: index for index, value in enumerate(target._support())}
+                fallback = len(order)
+                weights = {
+                    value: weights[value]
+                    for value in sorted(weights, key=lambda value: order.get(value, fallback))
+                }
+                return Dice._raw(weights)
             finally:
                 _active_world.reset(token)
 
@@ -1566,11 +2043,12 @@ def _():
             real outcome objects (the widget's faces round-trip through JSON).
             """
             soft = dict(soft or {})
+            posteriors = self._posteriors(given, soft)
             entries: "list[tuple[Dice[Any], Any, list[Any]]]" = []
             for node in [*self.sources, *self.derived] if nodes is None else list(nodes):
                 if id(node) in skip_ids:
                     continue
-                posterior = self.query(node, given, soft)
+                posterior = posteriors[id(node)]
                 plot = _belief_plot(posterior, touched=node in self._beliefs)
                 entries.append((node, plot, list(posterior.probs)))
             self._wire_belief_editors(entries, given, soft)
@@ -1596,11 +2074,13 @@ def _():
                     return
                 pushing["active"] = True
                 try:
+                    # one calibration for the whole graph, not a query per node
+                    posteriors = self._posteriors(given, soft)
                     for node, plot, outcomes in entries:
                         if node is origin and node in self._beliefs:
                             continue  # don't repaint the editor being dragged
                         try:
-                            posterior = self.query(node, given, soft)
+                            posterior = posteriors[id(node)]
                             weights = [_plot_value(posterior.probs.get(outcome, 0)) for outcome in outcomes]
                             faces = [_plot_value(outcome) for outcome in outcomes]
                             plot.variables = {
@@ -1612,6 +2092,8 @@ def _():
                             }
                         except Exception:
                             continue  # a stale widget (closed comm) must not break the rest
+                except Exception:
+                    pass  # e.g. transiently impossible evidence mid-drag
                 finally:
                     pushing["active"] = False
 
