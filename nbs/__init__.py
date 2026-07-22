@@ -1,9 +1,8 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "hastyplot==0.4.1",
 #     "marimo>=0.23.9",
-#     "pandas==3.0.3",
+#     "wigglystuff>=0.5.21",
 # ]
 # ///
 
@@ -97,6 +96,47 @@ def _(Dice, mo, sides_slider):
             Dice.from_sides(sides_slider.value).out_of(3, max),
         ]
     )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## Editing a dice by hand
+
+    `Dice.editor()` returns a draggable widget: drag the bars to reshape the
+    distribution. The `mode=` argument configures *how* a drag updates the
+    probabilities — this is the seam for the different ways of generating a
+    dice:
+
+    - `"renormalize"` (default) — drag freely, then the whole vector rescales
+      to sum to 1 when you let go.
+    - `"locked"` — the total stays pinned at 1 *during* the drag; the other
+      bars absorb the change proportionally.
+
+    Pick a mode, drag the bars, and watch the reconstructed `Dice` update.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    edit_mode = mo.ui.dropdown(["renormalize", "locked"], value="renormalize", label="drag mode")
+    edit_mode
+    return (edit_mode,)
+
+
+@app.cell
+def _(Dice, edit_mode, mo):
+    die_editor = mo.ui.anywidget(Dice.from_sides(6).editor(mode=edit_mode.value))
+    die_editor
+    return (die_editor,)
+
+
+@app.cell
+def _(Dice, die_editor):
+    # The edited dice, recomputed reactively on every drag.
+    Dice.from_editor(die_editor)
     return
 
 
@@ -304,6 +344,65 @@ def _():
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Editable dice inside the graph
+
+    A *node can be an editor*. There are two ways to grab a distribution, and
+    they mean different things:
+
+    - **`editable=`** edits a *source prior* — it changes the generative model.
+      Build the prior from the widget with `Dice.from_editor(...)`.
+    - **`evidence=`** treats the dragged distribution as *soft (Jeffrey)
+      evidence* on any node — an observation to condition on, not a model change.
+      Because a graphical model propagates belief both ways, dragging the child
+      `swab` updates the `sick` parent's posterior too.
+
+    Below, `sick`'s prior is editable and `swab` takes evidence. Drag either and
+    watch the `sick` posterior move.
+    """)
+    return
+
+
+@app.cell
+def _(Dice, mo):
+    sick_prior = mo.ui.anywidget(
+        Dice({"present": 0.01, "absent": 0.99}).editor(mode="locked")
+    )
+    sick_prior
+    return (sick_prior,)
+
+
+@app.cell
+def _(Dice, model, sick_prior):
+    with model() as clinic:
+        sick2 = Dice.from_editor(sick_prior)  # editable prior, dragged above
+        swab2 = Dice.from_function(
+            lambda s: {"pos": 0.9, "neg": 0.1} if s == "present" else {"pos": 0.05, "neg": 0.95},
+            parents=[sick2],
+        )
+    return clinic, swab2
+
+
+@app.cell
+def _(Dice, mo):
+    swab_prior = mo.ui.anywidget(
+        Dice({"pos": 0.01, "neg": 0.99}).editor(mode="locked")
+    )
+    swab_prior
+    return (swab_prior,)
+
+
+@app.cell
+def _(clinic, swab2, swab_prior):
+    # sick2 (its parent) stays a read-only posterior chart; swab2 renders as the
+    # draggable belief. Drag swab2 toward "pos" and the sick2 posterior climbs —
+    # evidence flowing backward up the graph.
+    clinic.show(evidence={swab2: swab_prior})
+    return
+
+
 @app.cell(column=1, hide_code=True)
 def _(mo):
     mo.md(r"""
@@ -320,9 +419,8 @@ def _(mo):
 def _():
     ## Export
 
-    import pandas as pd
     import marimo as mo
-    from hastyplot import qplot
+    from wigglystuff import ObservablePlot
     import random
     from collections.abc import Callable, Hashable, Iterator, Mapping, Sequence
     from collections import Counter, defaultdict
@@ -533,6 +631,41 @@ def _():
             return cast("Dice[float]", cast(Any, cls)(probs))
 
         @classmethod
+        def from_weights(cls, faces: "Sequence[Any]", weights: "Sequence[Weight]") -> "Dice[Any]":
+            """Build a dice from parallel ``faces`` and ``weights``.
+
+            Weights are normalized to sum to 1. Like the other public
+            constructors (``from_numbers``, ``from_dist``), the dice registers as
+            a *source* variable when created inside a ``with model():`` block, so
+            an edited prior can drive a model. This is the reconstruction path for
+            :meth:`editor`: the widget hands back edited ``faces``/``weights`` (as
+            plain JSON) and this rebuilds a ``Dice``.
+            """
+            return cast("Dice[Any]", cast(Any, cls)({f: w for f, w in zip(faces, weights)}))
+
+        @classmethod
+        def from_editor(cls, widget: Any) -> "Dice[Any]":
+            """Reconstruct a dice from the state of an :meth:`editor` widget.
+
+            Accepts either the ``ObservablePlot`` returned by :meth:`editor` or a
+            ``marimo.ui.anywidget`` wrapping it, reads the edited ``faces`` and
+            ``weights`` out of its ``variables`` trait, and returns a normalized
+            ``Dice``. Falls back to the untouched distribution if the widget has
+            not been dragged yet.
+            """
+            variables = getattr(widget, "variables", None)
+            if variables is None:
+                value = getattr(widget, "value", {}) or {}
+                variables = value.get("variables", value)
+            faces = variables.get("faces")
+            weights = variables.get("weights")
+            if faces is None or weights is None:
+                data = variables.get("data", [])
+                faces = [row["i"] for row in data]
+                weights = [row["p"] for row in data]
+            return cls.from_weights(faces, weights)
+
+        @classmethod
         def from_function(cls, fn: "Callable[..., Any]", parents: "Sequence[Dice[Any]]" = ()) -> "Dice[Any]":
             """Create a *dependent* variable from a conditional distribution.
 
@@ -651,35 +784,47 @@ def _():
             total_prob = sum(new_probs.values())
             return Dice._raw({k: v / total_prob for k, v in new_probs.items()})
 
-        def _repr_html_(self) -> str:
+        def _repr_mimebundle_(self, **kwargs: Any) -> Any:
             """
-            Return HTML representation of the dice for display in notebooks.
+            Render the dice as a live Observable Plot widget in notebooks.
 
-            Returns:
-                str: HTML string for rendering
+            Delegates to :meth:`prob_chart`, so a bare ``Dice`` displays as its
+            probability mass function (an ``ObservablePlot`` anywidget) rather
+            than static HTML.
             """
-            return mo.as_html(self.prob_chart()).text
+            return self.prob_chart()._repr_mimebundle_(**kwargs)
 
         def prob_chart(self) -> Any:
             """
             Create a visualization of the dice probability distribution.
 
             Returns:
-                alt.Chart: An Altair chart showing the probability mass function
+                ObservablePlot: An Observable Plot widget showing the probability
+                mass function.
             """
-            df = pd.DataFrame(
-                [{"i": _plot_value(k), "p": _plot_value(v)} for k, v in self.probs.items()]
-            )
-            return qplot(
-                df,
-                "i",
-                "p",
-                mark="bar",
-                tooltip=["i", "p"],
-                title="Dice with probabilities:",
-                width=120,
-                height=120,
-                theme="default",
+            data = [{"i": _plot_value(k), "p": _plot_value(v)} for k, v in self.probs.items()]
+            return ObservablePlot(
+                """Plot.plot({
+                    width, height,
+                    marginLeft: 44,
+                    marginBottom: 28,
+                    x: {
+                        label: null,
+                        tickFormat: (d) => typeof d === "number"
+                            ? (Number.isInteger(d) ? String(d) : d.toFixed(2)) : d,
+                        ticks: data.length > 10
+                            ? data.map((d) => d.i).filter((_, i) => i % Math.ceil(data.length / 10) === 0)
+                            : undefined,
+                    },
+                    y: {label: "p", grid: true},
+                    marks: [
+                        Plot.barY(data, {x: "i", y: "p"}),
+                        Plot.ruleY([0]),
+                    ],
+                })""",
+                variables={"data": data},
+                width=220,
+                height=180,
             )
 
         def cdf_chart(self) -> Any:
@@ -687,24 +832,191 @@ def _():
             Create a visualization of the cumulative distribution function.
 
             Returns:
-                alt.Chart: An Altair step chart showing the cumulative probability
+                ObservablePlot: An Observable Plot step chart showing the
+                cumulative probability.
             """
             cumulative = 0
-            rows = []
+            data = []
             for outcome, probability in sorted(self.probs.items()):
                 cumulative += probability
-                rows.append({"i": _plot_value(outcome), "p": _plot_value(cumulative)})
-            df = pd.DataFrame(rows)
-            return qplot(
-                df,
-                "i",
-                "p",
-                mark="step",
-                tooltip=["i", "p"],
-                title="Cumulative distribution:",
-                width=120,
-                height=120,
-                theme="default",
+                data.append({"i": _plot_value(outcome), "p": _plot_value(cumulative)})
+            return ObservablePlot(
+                """Plot.plot({
+                    width, height,
+                    marginLeft: 44,
+                    marginBottom: 28,
+                    title: "Cumulative distribution:",
+                    x: {
+                        label: null,
+                        tickFormat: (d) => typeof d === "number"
+                            ? (Number.isInteger(d) ? String(d) : d.toFixed(2)) : d,
+                        ticks: data.length > 10
+                            ? data.map((d) => d.i).filter((_, i) => i % Math.ceil(data.length / 10) === 0)
+                            : undefined,
+                    },
+                    y: {domain: [0, 1], label: "p", grid: true},
+                    marks: [
+                        Plot.lineY(data, {x: "i", y: "p", curve: "step-after"}),
+                        Plot.ruleY([0]),
+                    ],
+                })""",
+                variables={"data": data},
+                width=220,
+                height=180,
+            )
+
+        def editor(self, mode: str = "renormalize") -> Any:
+            """Return a live, draggable widget for editing this dice's probabilities.
+
+            The returned ``ObservablePlot`` renders one bar per outcome; drag a
+            bar up or down to change its probability. On release the edited
+            weights are written back into the widget's ``variables`` trait, so
+            in marimo you can reconstruct the edited dice reactively::
+
+                w = mo.ui.anywidget(die.editor())
+                edited = Dice.from_editor(w)   # recomputed on every drag
+
+            Two interaction variations are available via ``mode``:
+
+            * ``"renormalize"`` (default) — drag any bar freely; on release the
+              whole vector is renormalized so the probabilities sum to 1.
+            * ``"locked"`` — the total stays pinned at 1 *during* the drag: the
+              other bars absorb the change proportionally, for a smoother feel.
+
+            The dice itself is not mutated; use :meth:`from_editor` (or
+            :meth:`from_weights`) to obtain the edited distribution.
+            """
+            if mode not in ("renormalize", "locked"):
+                raise ValueError("mode must be 'renormalize' or 'locked'")
+            data = [{"i": _plot_value(k), "p": _plot_value(v)} for k, v in self.probs.items()]
+            return ObservablePlot(
+                """
+                const n = data.length;
+                const mode = typeof editMode === "string" ? editMode : "renormalize";
+                const margin = {top: 20, right: 12, bottom: 30, left: 44};
+                const iw = Math.max(10, width - margin.left - margin.right);
+                const ih = Math.max(10, height - margin.top - margin.bottom);
+
+                const svg = d3.create("svg")
+                    .attr("width", width).attr("height", height)
+                    .attr("viewBox", `0 0 ${width} ${height}`)
+                    .style("max-width", "100%").style("font", "10px sans-serif")
+                    // stop dragging from turning into a text selection of the labels
+                    .style("user-select", "none")
+                    .style("-webkit-user-select", "none")
+                    .style("touch-action", "none");
+
+                const g = svg.append("g")
+                    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+                const x = d3.scaleBand()
+                    .domain(d3.range(n).map((i) => String(data[i].i)))
+                    .range([0, iw]).padding(0.15);
+                const y = d3.scaleLinear().domain([0, 1]).range([ih, 0]);
+
+                g.append("g").attr("transform", `translate(0,${ih})`).call(d3.axisBottom(x));
+                g.append("g").call(d3.axisLeft(y).ticks(5, "%"));
+
+                // `probs`, not `weights`: the injected `variables` keys arrive as
+                // function parameters, so a `let weights` would redeclare one.
+                const original = data.map((d) => Number(d.p));
+                let probs = original.slice();
+                // only a *dragged* editor asserts evidence; a fresh one is a no-op
+                let touched = (model.get("variables") || {}).touched || false;
+
+                // visible bars — display only, so they never steal the drag
+                const bars = g.selectAll("rect.bar").data(d3.range(n)).join("rect")
+                    .attr("class", "bar")
+                    .attr("x", (i) => x(String(data[i].i)))
+                    .attr("width", x.bandwidth())
+                    .attr("fill", "#4269d0")
+                    .attr("pointer-events", "none");
+
+                const labels = g.selectAll("text.lab").data(d3.range(n)).join("text")
+                    .attr("class", "lab")
+                    .attr("x", (i) => x(String(data[i].i)) + x.bandwidth() / 2)
+                    .attr("text-anchor", "middle").attr("font-size", 9)
+                    .attr("pointer-events", "none");
+
+                // full-height transparent targets: a bar dragged to 0 is still grabbable
+                const hits = g.selectAll("rect.hit").data(d3.range(n)).join("rect")
+                    .attr("class", "hit")
+                    .attr("x", (i) => x(String(data[i].i)))
+                    .attr("width", x.bandwidth())
+                    .attr("y", 0).attr("height", ih)
+                    .attr("fill", "transparent")
+                    .style("cursor", "ns-resize");
+
+                svg.append("text")
+                    .attr("x", width - margin.right).attr("y", 14)
+                    .attr("text-anchor", "end").attr("fill", "#4269d0")
+                    .style("cursor", "pointer").style("text-decoration", "underline")
+                    .text("reset")
+                    .on("click", (event) => {
+                        event.stopPropagation();
+                        probs = original.slice();
+                        touched = false;
+                        redraw();
+                        commit();
+                    });
+
+                function redraw() {
+                    bars.attr("y", (i) => y(probs[i])).attr("height", (i) => ih - y(probs[i]));
+                    labels.attr("y", (i) => Math.max(9, y(probs[i]) - 3))
+                        .text((i) => probs[i].toFixed(2));
+                }
+                redraw();
+
+                function setBar(idx, target) {
+                    target = Math.max(0, Math.min(1, target));
+                    if (mode === "locked") {
+                        const others = probs.reduce((a, w, j) => a + (j === idx ? 0 : w), 0);
+                        const room = 1 - target;
+                        if (others <= 0) {
+                            const share = room / Math.max(1, n - 1);
+                            probs = probs.map((w, j) => (j === idx ? target : share));
+                        } else {
+                            const scale = room / others;
+                            probs = probs.map((w, j) => (j === idx ? target : w * scale));
+                        }
+                    } else {
+                        probs[idx] = target;
+                    }
+                    redraw();
+                }
+
+                function commit() {
+                    if (mode !== "locked") {
+                        const total = probs.reduce((a, b) => a + b, 0);
+                        if (total > 0) probs = probs.map((w) => w / total);
+                        redraw();
+                    }
+                    const vars = {...model.get("variables")};
+                    vars.data = d3.range(n).map((i) => ({i: data[i].i, p: probs[i]}));
+                    vars.weights = probs.slice();
+                    vars.faces = data.map((d) => d.i);
+                    model.set("variables", vars);
+                    model.save_changes();
+                }
+
+                const drag = d3.drag()
+                    .container(() => g.node())
+                    .on("start", (event) => { if (event.sourceEvent) event.sourceEvent.preventDefault(); })
+                    .on("drag", (event, i) => setBar(i, y.invert(event.y)))
+                    .on("end", commit);
+
+                hits.call(drag);
+
+                return svg.node();
+                """,
+                variables={
+                    "data": data,
+                    "editMode": mode,
+                    "faces": [row["i"] for row in data],
+                    "weights": [row["p"] for row in data],
+                },
+                width=280,
+                height=220,
             )
 
         def ordered(self, n: int, k: int | None = None) -> list["Dice[T]"]:
@@ -895,7 +1207,7 @@ def _():
         into a name. Best-effort: returns ``None`` for inline use, tuple
         unpacking, or attribute/subscript targets.
         """
-        internal = {"from_numbers", "from_sides", "from_dist", "from_function", "take", "_raw", "_make", "_derive", "_coerce_dice"}
+        internal = {"from_numbers", "from_sides", "from_dist", "from_function", "from_weights", "from_editor", "take", "_raw", "_make", "_derive", "_coerce_dice"}
         frame: "Any" = sys._getframe(1)
         while frame is not None and (frame.f_code.co_name.startswith("__") or frame.f_code.co_name in internal):
             frame = frame.f_back
@@ -946,15 +1258,50 @@ def _():
                 rows = expanded
             return rows
 
-        def query(self, target: "Dice[Any]", given: "Dice[Any] | None" = None) -> "Dice[Any]":
+        def query(
+            self,
+            target: "Dice[Any]",
+            given: "Dice[Any] | None" = None,
+            evidence: "Mapping[Dice[Any], Mapping[Any, Weight]] | None" = None,
+        ) -> "Dice[Any]":
+            """Marginal of ``target``, optionally under evidence.
+
+            ``given`` is *hard* evidence: a boolean predicate that must hold.
+
+            ``evidence`` is *soft* (Jeffrey) evidence: a mapping from a variable
+            to a target distribution over its outcomes. The joint is reweighted so
+            each listed variable's posterior marginal becomes that distribution,
+            and the belief propagates to every other variable — descendants *and*
+            parents, exactly as a probabilistic graphical model dictates. Hard
+            evidence is the point-mass special case. With several soft-evidence
+            variables the updates are applied in turn (sequential Jeffrey
+            conditioning).
+            """
             # Enumerate with the model deactivated, so dice built by conditional
             # functions (and the result itself) are not registered as variables.
             token = _active_world.set(None)
             try:
+                rows = self.joint()
+                if given is not None:
+                    rows = [(a, w) for a, w in rows if given._eval(a)]
+                for node, dist in (evidence or {}).items():
+                    marginal: "defaultdict[Any, Weight]" = defaultdict(int)
+                    for assignment, weight in rows:
+                        marginal[node._eval(assignment)] += weight
+                    total = sum(marginal.values())
+                    if total == 0:
+                        raise ValueError("evidence has zero probability")
+                    scale = sum(dist.values())
+                    target_prob = {k: v / scale for k, v in dist.items()}
+                    # reweight each atom so node's marginal matches target_prob
+                    rows = [
+                        (assignment, weight * target_prob.get(value, 0) * total / marginal[value])
+                        for assignment, weight in rows
+                        for value in (node._eval(assignment),)
+                        if marginal[value] > 0
+                    ]
                 weights: "defaultdict[Any, Weight]" = defaultdict(int)
-                for assignment, weight in self.joint():
-                    if given is not None and not given._eval(assignment):
-                        continue
+                for assignment, weight in rows:
                     weights[target._eval(assignment)] += weight
                 if sum(weights.values()) == 0:
                     raise ValueError("evidence has zero probability")
@@ -983,7 +1330,13 @@ def _():
             walk(node)
             return found
 
-        def show(self, given: "Dice[Any] | None" = None, inputs: "Mapping[Dice[Any], Any] | None" = None) -> Any:
+        def show(
+            self,
+            given: "Dice[Any] | None" = None,
+            inputs: "Mapping[Dice[Any], Any] | None" = None,
+            editable: "Mapping[Dice[Any], Any] | None" = None,
+            evidence: "Mapping[Dice[Any], Any] | None" = None,
+        ) -> Any:
             """Render the model as a DAG of per-variable charts (marimo only).
 
             Each source and each named derived variable becomes a node,
@@ -997,6 +1350,20 @@ def _():
             ``inputs`` maps a target variable to a widget (e.g. a slider), drawn
             as an extra upstream node with an arrow into its target; read the
             widget's ``.value`` inside the ``variable`` it feeds for reactivity.
+
+            ``editable`` maps a *source* variable to a :meth:`editor` widget,
+            rendering that node *as the editor itself* so you can drag its prior
+            right inside the graph. Build the model's prior for that variable from
+            the same widget via :meth:`from_editor`; because marimo re-runs the
+            model cell on every drag, the whole graph recomputes live. This edits
+            the *generative model*.
+
+            ``evidence`` maps *any* variable to a :meth:`editor` widget and treats
+            the dragged distribution as soft (Jeffrey) *evidence* on that node —
+            not a change to the model, but an observation to condition on. Belief
+            flows both ways, so dragging a child updates its parents' posteriors
+            too. Under the hood every other node is queried with this soft
+            evidence (see :meth:`query`).
             """
             import marimo as mo
             from wigglystuff import WidgetDAG
@@ -1005,11 +1372,17 @@ def _():
             tracked_ids = {id(node) for node in graph_nodes}
             names = {id(node): (node._name or f"var{index}") for index, node in enumerate(graph_nodes)}
 
+            editable_by_id = {id(node): widget for node, widget in (editable or {}).items()}
+            evidence_by_id = {id(node): widget for node, widget in (evidence or {}).items()}
+            widget_by_id = {**editable_by_id, **evidence_by_id}
+            # dragged evidence editors become soft evidence for querying the rest
+            soft = {node: Dice.from_editor(widget).probs for node, widget in (evidence or {}).items()}
+
             nodes: dict[str, Any] = {
-                names[id(node)]: mo.ui.altair_chart(
-                    self.query(node, given).prob_chart(),
-                    chart_selection=False,
-                    legend_selection=False,
+                names[id(node)]: (
+                    widget_by_id[id(node)]
+                    if id(node) in widget_by_id
+                    else mo.ui.anywidget(self.query(node, given, soft).prob_chart())
                 )
                 for node in graph_nodes
             }
@@ -1048,7 +1421,21 @@ def _():
         finally:
             _active_world.reset(token)
 
-    return Any, Callable, Counter, Dice, Fraction, Hashable, Mapping, Sequence, Weight, World, cast, dataclass, defaultdict, mo, model, mul, permutations, product, random, reduce
+    return (
+        Any,
+        Counter,
+        Dice,
+        Fraction,
+        Hashable,
+        Sequence,
+        Weight,
+        cast,
+        mo,
+        model,
+        permutations,
+        product,
+        random,
+    )
 
 
 @app.cell
@@ -1124,7 +1511,7 @@ def _(Counter, Dice, Sequence, permutations, product):
 
 
 @app.cell
-def _(Any, Dice, Hashable, Sequence, Weight, cast):
+def _(Any, Dice, Hashable, Sequence, Weight: "TypeAlias", cast):
     ## Export
 
     from functools import singledispatch
