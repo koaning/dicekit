@@ -455,7 +455,10 @@ def _(clinic, mo):
     _CPT_JS = """Plot.plot({
         width, height,
         marginLeft: 56, marginBottom: 26,
-        x: {label: null}, y: {label: null},
+        // keep data order: Plot would otherwise sort outcomes alphabetically,
+        // disagreeing with the variable charts' axis order
+        x: {label: null, domain: [...new Set(data.map((d) => d.out))]},
+        y: {label: null, domain: [...new Set(data.map((d) => d.given))]},
         color: {domain: [0, 1], scheme: "blues"},
         marks: [
             Plot.cell(data, {x: "out", y: "given", fill: "p"}),
@@ -477,7 +480,8 @@ def _(clinic, mo):
     return Plot.plot({
         width, height,
         marginLeft: 36, marginBottom: 22,
-        y: {domain: [0, 1], label: null}, x: {label: null},
+        y: {domain: [0, 1], label: null},
+        x: {label: null, domain: data.map((d) => d.i)},
         marks: [Plot.barY(data, {x: "i", y: "p", fill: "#ff725c"}), Plot.ruleY([0])],
     });
     """
