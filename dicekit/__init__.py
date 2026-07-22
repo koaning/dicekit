@@ -41,6 +41,156 @@ def _plot_value(value: Any) -> Any:
         return value
 
 
+# The one bar-chart-with-drag JS, parameterized by `uiChrome`:
+# - "editor" (Dice.editor): always draggable, with a `reset` link.
+# - "belief" (World.show nodes): renders as a plain posterior chart with an
+#   `edit` toggle; while editing the bars drag and commit as a *belief*
+#   (`touched` in the synced variables), `reset` withdraws it. All state
+#   that must survive re-renders rides in the `variables` trait, because
+#   the widget fully re-runs this code on every variables change — its own
+#   commits and the kernel's posterior pushes alike.
+_EDITOR_JS = """
+const n = data.length;
+const mode = typeof editMode === "string" ? editMode : "renormalize";
+const chrome = typeof uiChrome === "string" ? uiChrome : "editor";
+const state = model.get("variables") || {};
+let touched = !!state.touched;
+let editing = chrome === "editor" ? true : !!state.editing;
+const margin = {top: 20, right: 12, bottom: 30, left: 44};
+const iw = Math.max(10, width - margin.left - margin.right);
+const ih = Math.max(10, height - margin.top - margin.bottom);
+
+const svg = d3.create("svg")
+    .attr("width", width).attr("height", height)
+    .attr("viewBox", `0 0 ${width} ${height}`)
+    .style("max-width", "100%").style("font", "10px sans-serif")
+    // stop dragging from turning into a text selection of the labels
+    .style("user-select", "none")
+    .style("-webkit-user-select", "none")
+    .style("touch-action", "none");
+
+const g = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+const x = d3.scaleBand()
+    .domain(d3.range(n).map((i) => String(data[i].i)))
+    .range([0, iw]).padding(0.15);
+const y = d3.scaleLinear().domain([0, 1]).range([ih, 0]);
+
+g.append("g").attr("transform", `translate(0,${ih})`).call(d3.axisBottom(x));
+g.append("g").call(d3.axisLeft(y).ticks(5, "%"));
+
+// `probs`, not `weights`: the injected `variables` keys arrive as
+// function parameters, so a `let weights` would redeclare one.
+const original = data.map((d) => Number(d.p));
+let probs = original.slice();
+
+// visible bars — display only, so they never steal the drag
+const bars = g.selectAll("rect.bar").data(d3.range(n)).join("rect")
+    .attr("class", "bar")
+    .attr("x", (i) => x(String(data[i].i)))
+    .attr("width", x.bandwidth())
+    .attr("pointer-events", "none");
+
+const labels = g.selectAll("text.lab").data(d3.range(n)).join("text")
+    .attr("class", "lab")
+    .attr("x", (i) => x(String(data[i].i)) + x.bandwidth() / 2)
+    .attr("text-anchor", "middle").attr("font-size", 9)
+    .attr("pointer-events", "none");
+
+// full-height transparent targets: a bar dragged to 0 is still grabbable
+const hits = g.selectAll("rect.hit").data(d3.range(n)).join("rect")
+    .attr("class", "hit")
+    .attr("x", (i) => x(String(data[i].i)))
+    .attr("width", x.bandwidth())
+    .attr("y", 0).attr("height", ih)
+    .attr("fill", "transparent")
+    .style("cursor", editing ? "ns-resize" : "default");
+
+function persist(extra) {
+    model.set("variables", {...model.get("variables"), ...extra});
+    model.save_changes();
+}
+
+function redraw() {
+    bars.attr("y", (i) => y(probs[i])).attr("height", (i) => ih - y(probs[i]))
+        // an asserted belief shows in the bar color
+        .attr("fill", touched ? "#ff725c" : "#4269d0");
+    labels.attr("y", (i) => Math.max(9, y(probs[i]) - 3))
+        .text((i) => probs[i].toFixed(2));
+}
+redraw();
+
+function setBar(idx, target) {
+    target = Math.max(0, Math.min(1, target));
+    if (mode === "locked") {
+        const others = probs.reduce((a, w, j) => a + (j === idx ? 0 : w), 0);
+        const room = 1 - target;
+        if (others <= 0) {
+            const share = room / Math.max(1, n - 1);
+            probs = probs.map((w, j) => (j === idx ? target : share));
+        } else {
+            const scale = room / others;
+            probs = probs.map((w, j) => (j === idx ? target : w * scale));
+        }
+    } else {
+        probs[idx] = target;
+    }
+    redraw();
+}
+
+function commit() {
+    if (mode !== "locked") {
+        const total = probs.reduce((a, b) => a + b, 0);
+        if (total > 0) probs = probs.map((w) => w / total);
+        redraw();
+    }
+    persist({
+        data: d3.range(n).map((i) => ({i: data[i].i, p: probs[i]})),
+        weights: probs.slice(),
+        faces: data.map((d) => d.i),
+        touched: touched,
+        editing: editing,
+    });
+}
+
+function reset() {
+    probs = original.slice();
+    touched = false;
+    redraw();
+    commit();
+}
+
+// control links, laid out right-to-left in the top corner
+const controls = [];
+if (chrome === "belief") {
+    controls.push({label: editing ? "done" : "edit", act: () => persist({editing: !editing})});
+    if (touched) controls.push({label: "reset", act: reset});
+} else {
+    controls.push({label: "reset", act: reset});
+}
+controls.forEach((ctrl, index) => {
+    svg.append("text")
+        .attr("x", width - margin.right - 40 * index).attr("y", 14)
+        .attr("text-anchor", "end").attr("fill", "#4269d0")
+        .style("cursor", "pointer").style("text-decoration", "underline")
+        .text(ctrl.label)
+        .on("click", (event) => { event.stopPropagation(); ctrl.act(); });
+});
+
+if (editing) {
+    const drag = d3.drag()
+        .container(() => g.node())
+        .on("start", (event) => { if (event.sourceEvent) event.sourceEvent.preventDefault(); })
+        .on("drag", (event, i) => { touched = true; setBar(i, y.invert(event.y)); })
+        .on("end", commit);
+    hits.call(drag);
+}
+
+return svg.node();
+"""
+
+
 class Dice[T: Hashable]:
     """
     A class representing dice with arbitrary probability distributions.
@@ -71,6 +221,8 @@ class Dice[T: Hashable]:
         self._is_predicate = False
         self._is_source = False
         self._name: str | None = None
+        self._lazy = False
+        self._probs_version = -1
 
         world = _active_world.get()
         if world is not None:
@@ -108,6 +260,8 @@ class Dice[T: Hashable]:
         obj._is_predicate = is_predicate
         obj._is_source = is_source
         obj._name = name
+        obj._lazy = probs is None
+        obj._probs_version = -1
         return obj
 
     @classmethod
@@ -126,11 +280,17 @@ class Dice[T: Hashable]:
         """The outcome→probability mapping.
 
         For a lazy *variable* (a dependent or a derived expression) this is
-        computed once as the marginal over the model's joint, then cached.
+        the marginal over the model's joint under the world's current
+        beliefs, cached until those beliefs change. A root's ``probs`` stays
+        its prior — that is its generative definition; read a root's
+        posterior with :meth:`marginal` or ``p()``.
         """
-        if self._probs is None:
-            assert self._world is not None
-            self._probs = self._world.query(self)._probs
+        if self._lazy:
+            world = self._world
+            assert world is not None
+            if self._probs is None or self._probs_version != world._belief_version:
+                self._probs = world.query(self)._probs
+                self._probs_version = world._belief_version
         return cast("dict[Any, Weight]", self._probs)
 
     def __hash__(self) -> int:
@@ -472,122 +632,14 @@ class Dice[T: Hashable]:
             raise ValueError("mode must be 'renormalize' or 'locked'")
         data = [{"i": _plot_value(k), "p": _plot_value(v)} for k, v in self.probs.items()]
         return ObservablePlot(
-            """
-            const n = data.length;
-            const mode = typeof editMode === "string" ? editMode : "renormalize";
-            const margin = {top: 20, right: 12, bottom: 30, left: 44};
-            const iw = Math.max(10, width - margin.left - margin.right);
-            const ih = Math.max(10, height - margin.top - margin.bottom);
-
-            const svg = d3.create("svg")
-                .attr("width", width).attr("height", height)
-                .attr("viewBox", `0 0 ${width} ${height}`)
-                .style("max-width", "100%").style("font", "10px sans-serif")
-                // stop dragging from turning into a text selection of the labels
-                .style("user-select", "none")
-                .style("-webkit-user-select", "none")
-                .style("touch-action", "none");
-
-            const g = svg.append("g")
-                .attr("transform", `translate(${margin.left},${margin.top})`);
-
-            const x = d3.scaleBand()
-                .domain(d3.range(n).map((i) => String(data[i].i)))
-                .range([0, iw]).padding(0.15);
-            const y = d3.scaleLinear().domain([0, 1]).range([ih, 0]);
-
-            g.append("g").attr("transform", `translate(0,${ih})`).call(d3.axisBottom(x));
-            g.append("g").call(d3.axisLeft(y).ticks(5, "%"));
-
-            // `probs`, not `weights`: the injected `variables` keys arrive as
-            // function parameters, so a `let weights` would redeclare one.
-            const original = data.map((d) => Number(d.p));
-            let probs = original.slice();
-
-            // visible bars — display only, so they never steal the drag
-            const bars = g.selectAll("rect.bar").data(d3.range(n)).join("rect")
-                .attr("class", "bar")
-                .attr("x", (i) => x(String(data[i].i)))
-                .attr("width", x.bandwidth())
-                .attr("fill", "#4269d0")
-                .attr("pointer-events", "none");
-
-            const labels = g.selectAll("text.lab").data(d3.range(n)).join("text")
-                .attr("class", "lab")
-                .attr("x", (i) => x(String(data[i].i)) + x.bandwidth() / 2)
-                .attr("text-anchor", "middle").attr("font-size", 9)
-                .attr("pointer-events", "none");
-
-            // full-height transparent targets: a bar dragged to 0 is still grabbable
-            const hits = g.selectAll("rect.hit").data(d3.range(n)).join("rect")
-                .attr("class", "hit")
-                .attr("x", (i) => x(String(data[i].i)))
-                .attr("width", x.bandwidth())
-                .attr("y", 0).attr("height", ih)
-                .attr("fill", "transparent")
-                .style("cursor", "ns-resize");
-
-            svg.append("text")
-                .attr("x", width - margin.right).attr("y", 14)
-                .attr("text-anchor", "end").attr("fill", "#4269d0")
-                .style("cursor", "pointer").style("text-decoration", "underline")
-                .text("reset")
-                .on("click", () => { probs = original.slice(); redraw(); commit(); });
-
-            function redraw() {
-                bars.attr("y", (i) => y(probs[i])).attr("height", (i) => ih - y(probs[i]));
-                labels.attr("y", (i) => Math.max(9, y(probs[i]) - 3))
-                    .text((i) => probs[i].toFixed(2));
-            }
-            redraw();
-
-            function setBar(idx, target) {
-                target = Math.max(0, Math.min(1, target));
-                if (mode === "locked") {
-                    const others = probs.reduce((a, w, j) => a + (j === idx ? 0 : w), 0);
-                    const room = 1 - target;
-                    if (others <= 0) {
-                        const share = room / Math.max(1, n - 1);
-                        probs = probs.map((w, j) => (j === idx ? target : share));
-                    } else {
-                        const scale = room / others;
-                        probs = probs.map((w, j) => (j === idx ? target : w * scale));
-                    }
-                } else {
-                    probs[idx] = target;
-                }
-                redraw();
-            }
-
-            function commit() {
-                if (mode !== "locked") {
-                    const total = probs.reduce((a, b) => a + b, 0);
-                    if (total > 0) probs = probs.map((w) => w / total);
-                    redraw();
-                }
-                const vars = {...model.get("variables")};
-                vars.data = d3.range(n).map((i) => ({i: data[i].i, p: probs[i]}));
-                vars.weights = probs.slice();
-                vars.faces = data.map((d) => d.i);
-                model.set("variables", vars);
-                model.save_changes();
-            }
-
-            const drag = d3.drag()
-                .container(() => g.node())
-                .on("start", (event) => { if (event.sourceEvent) event.sourceEvent.preventDefault(); })
-                .on("drag", (event, i) => setBar(i, y.invert(event.y)))
-                .on("end", commit);
-
-            hits.call(drag);
-
-            return svg.node();
-            """,
+            _EDITOR_JS,
             variables={
                 "data": data,
                 "editMode": mode,
+                "uiChrome": "editor",
                 "faces": [row["i"] for row in data],
                 "weights": [row["p"] for row in data],
+                "touched": False,
             },
             width=280,
             height=220,
@@ -639,10 +691,12 @@ class Dice[T: Hashable]:
 
     def _dist_for(self, assignment: "Mapping[Dice[Any], Any]") -> "Dice[Any]":
         # The conditional distribution of this source given an assignment to
-        # its parents. A root's distribution is simply itself.
+        # its parents. A root's distribution is simply itself. Parents are
+        # evaluated, not looked up: a *derived* parent (e.g. ``a + b``) is
+        # not a column of the joint, only sources are.
         if self._fn is None:
             return self
-        values = [assignment[parent] for parent in self._parents]
+        values = [parent._eval(assignment) for parent in self._parents]
         return _coerce_dice(self._fn(*values))
 
     def _eval(self, assignment: "Mapping[Dice[Any], Any]") -> Any:
@@ -659,6 +713,31 @@ class Dice[T: Hashable]:
         """The marginal distribution of this variable over the model joint."""
         assert self._world is not None, "marginal() is only defined for model variables"
         return self._world.query(self)
+
+    def believe(self, dist: "Mapping[Any, Weight] | Dice[Any]") -> None:
+        """Assert a soft (Jeffrey) belief on this variable, in place.
+
+        ``dist`` maps outcomes to weights (or is a plain ``Dice``). The
+        world conditions every subsequent query on it, so the belief
+        propagates across the whole graph — parents and descendants — the
+        next time any variable is read (``p()``, :meth:`marginal`,
+        :attr:`probs`, :meth:`World.show`). Beliefs on several variables
+        are satisfied *jointly* (see :meth:`World.query`); believing again
+        replaces this variable's earlier belief, and :meth:`forget`
+        withdraws it. A point mass is hard evidence::
+
+            test.believe({"positive": 1})
+        """
+        if self._world is None:
+            raise TypeError("believe() needs a model variable; this dice is standalone")
+        probs = dist.probs if isinstance(dist, Dice) else dict(dist)
+        self._world._set_belief(self, probs)
+
+    def forget(self) -> None:
+        """Withdraw this variable's asserted belief (see :meth:`believe`)."""
+        if self._world is None:
+            raise TypeError("forget() needs a model variable; this dice is standalone")
+        self._world._clear_belief(self)
 
     def _derive(self, op: "Callable[..., Any]", operands: "Sequence[Any]", is_predicate: bool) -> "Dice[Any]":
         # Build a derived variable from an operator. A directly-assigned
@@ -803,6 +882,98 @@ def _coerce_dice(value: object) -> "Dice[Any]":
     return Dice._raw(cast(Mapping[Any, Weight], value))
 
 
+def _jeffrey_condition(
+    rows: "list[tuple[dict[Dice[Any], Any], Weight]]",
+    beliefs: "Mapping[Dice[Any], Mapping[Any, Weight]]",
+    max_rounds: int = 100,
+    tol: float = 1e-9,
+) -> "list[tuple[dict[Dice[Any], Any], Weight]]":
+    """Reweight joint atoms so each believed variable's marginal matches its
+    target distribution — all of them at once.
+
+    One belief is plain Jeffrey conditioning. A single sequential pass over
+    several beliefs is order-dependent (each update disturbs the earlier
+    marginals when the variables are correlated), so the passes are iterated
+    to their joint fixpoint (iterative proportional fitting). Target mass on
+    outcomes the joint cannot reach is dropped and the remainder
+    renormalized, per variable, as in single-pass Jeffrey conditioning.
+    """
+    if not beliefs:
+        return rows
+    targets: "dict[Dice[Any], dict[Any, Weight]]" = {}
+    for node, dist in beliefs.items():
+        scale = sum(dist.values())
+        if scale <= 0:
+            raise ValueError("belief must have positive total weight")
+        targets[node] = {value: weight / scale for value, weight in dist.items()}
+    for _ in range(max_rounds):
+        deviation: Weight = 0
+        for node, target in targets.items():
+            marginal: "defaultdict[Any, Weight]" = defaultdict(int)
+            for assignment, weight in rows:
+                marginal[node._eval(assignment)] += weight
+            total = sum(marginal.values())
+            if total == 0:
+                raise ValueError("evidence has zero probability")
+            reachable = sum(q for value, q in target.items() if marginal[value] > 0)
+            if reachable == 0:
+                raise ValueError("evidence has zero probability")
+            adjusted = {value: q / reachable for value, q in target.items() if marginal[value] > 0}
+            deviation = max(
+                deviation,
+                *[abs(marginal[value] / total - adjusted.get(value, 0)) for value in {*marginal, *adjusted}],
+            )
+            rows = [
+                (assignment, weight * adjusted.get(value, 0) * total / marginal[value])
+                for assignment, weight in rows
+                for value in (node._eval(assignment),)
+                if marginal[value] > 0
+            ]
+        if deviation <= tol:
+            break
+    return rows
+
+
+def _belief_plot(seed: "Dice[Any]", touched: bool = False) -> Any:
+    """The interactive node chart for :meth:`World.show`.
+
+    A posterior bar chart with an ``edit`` toggle: while editing, dragging
+    the bars asserts the dragged distribution as a belief (``touched`` in
+    the synced ``variables``) and ``reset`` withdraws it. The kernel side
+    (:meth:`World._wire_belief_editors`) listens on ``variables`` and keeps
+    every other node's chart in sync.
+    """
+    data = [{"i": _plot_value(k), "p": _plot_value(v)} for k, v in seed.probs.items()]
+    return ObservablePlot(
+        _EDITOR_JS,
+        variables={
+            "data": data,
+            "editMode": "locked",
+            "uiChrome": "belief",
+            "faces": [row["i"] for row in data],
+            "weights": [row["p"] for row in data],
+            "touched": touched,
+            "editing": False,
+        },
+        width=240,
+        height=190,
+    )
+
+
+def _widget_touched(widget: Any) -> bool:
+    """Whether an editor widget has actually been dragged.
+
+    A fresh editor still holds its seeded distribution; treating it as
+    evidence would *assert the seed* (e.g. re-clamp a variable to its
+    prior), so untouched widgets are ignored by :meth:`World.show`.
+    """
+    variables = getattr(widget, "variables", None)
+    if variables is None:
+        value = getattr(widget, "value", {}) or {}
+        variables = value.get("variables", value)
+    return bool(variables.get("touched"))
+
+
 class World:
     """A shared exact joint over the variables created within it.
 
@@ -810,17 +981,53 @@ class World:
     (roots + dependents, in creation order so a child's parents are bound
     before it) and any named derived expressions, and answers marginal /
     conditional queries by enumerating the joint.
+
+    Also carries the model's mutable *beliefs*: soft evidence asserted via
+    :meth:`Dice.believe` (or by dragging a node in :meth:`show`). Every
+    query conditions on them, so an updated belief propagates across the
+    whole graph on the next read; :meth:`forget` clears them all.
     """
 
     def __init__(self) -> None:
         self.sources: "list[Dice[Any]]" = []
         self.derived: "list[Dice[Any]]" = []
+        # Asserted beliefs (soft evidence) per variable — the world's
+        # mutable state. Every query conditions on them; the version
+        # counter invalidates the lazy `probs` caches, and listeners let
+        # rendered graphs repaint in place.
+        self._beliefs: "dict[Dice[Any], dict[Any, Weight]]" = {}
+        self._belief_version = 0
+        self._belief_listeners: "list[Callable[[Dice[Any] | None], None]]" = []
 
     def _register(self, variable: "Dice[Any]") -> None:
         self.sources.append(variable)
 
     def _register_derived(self, variable: "Dice[Any]") -> None:
         self.derived.append(variable)
+
+    def _set_belief(self, node: "Dice[Any]", dist: "Mapping[Any, Weight]") -> None:
+        if node._world is not self:
+            raise ValueError("belief must be about a variable of this model")
+        probs = dict(dist)
+        if not probs or sum(probs.values()) <= 0:
+            raise ValueError("belief must have positive total weight")
+        self._beliefs[node] = probs
+        self._belief_changed(node)
+
+    def _clear_belief(self, node: "Dice[Any]") -> None:
+        if self._beliefs.pop(node, None) is not None:
+            self._belief_changed(node)
+
+    def forget(self) -> None:
+        """Withdraw every asserted belief (see :meth:`Dice.believe`)."""
+        if self._beliefs:
+            self._beliefs.clear()
+            self._belief_changed(None)
+
+    def _belief_changed(self, node: "Dice[Any] | None") -> None:
+        self._belief_version += 1
+        for listener in list(self._belief_listeners):
+            listener(node)
 
     def joint(self) -> "list[tuple[dict[Dice[Any], Any], Weight]]":
         rows: "list[tuple[dict[Dice[Any], Any], Weight]]" = [({}, 1)]
@@ -847,9 +1054,12 @@ class World:
         each listed variable's posterior marginal becomes that distribution,
         and the belief propagates to every other variable — descendants *and*
         parents, exactly as a probabilistic graphical model dictates. Hard
-        evidence is the point-mass special case. With several soft-evidence
-        variables the updates are applied in turn (sequential Jeffrey
-        conditioning).
+        evidence is the point-mass special case. Several soft-evidence
+        variables are satisfied *jointly* (iterative proportional fitting),
+        so the result does not depend on their order.
+
+        Beliefs asserted on the world (:meth:`Dice.believe`) are always
+        folded in; ``evidence`` overrides a belief on the same variable.
         """
         # Enumerate with the model deactivated, so dice built by conditional
         # functions (and the result itself) are not registered as variables.
@@ -858,22 +1068,7 @@ class World:
             rows = self.joint()
             if given is not None:
                 rows = [(a, w) for a, w in rows if given._eval(a)]
-            for node, dist in (evidence or {}).items():
-                marginal: "defaultdict[Any, Weight]" = defaultdict(int)
-                for assignment, weight in rows:
-                    marginal[node._eval(assignment)] += weight
-                total = sum(marginal.values())
-                if total == 0:
-                    raise ValueError("evidence has zero probability")
-                scale = sum(dist.values())
-                target_prob = {k: v / scale for k, v in dist.items()}
-                # reweight each atom so node's marginal matches target_prob
-                rows = [
-                    (assignment, weight * target_prob.get(value, 0) * total / marginal[value])
-                    for assignment, weight in rows
-                    for value in (node._eval(assignment),)
-                    if marginal[value] > 0
-                ]
+            rows = _jeffrey_condition(rows, {**self._beliefs, **(evidence or {})})
             weights: "defaultdict[Any, Weight]" = defaultdict(int)
             for assignment, weight in rows:
                 weights[target._eval(assignment)] += weight
@@ -904,6 +1099,86 @@ class World:
         walk(node)
         return found
 
+    def _belief_entries(
+        self,
+        given: "Dice[Any] | None" = None,
+        soft: "Mapping[Dice[Any], Mapping[Any, Weight]] | None" = None,
+        skip_ids: "set[int] | frozenset[int]" = frozenset(),
+    ) -> "list[tuple[Dice[Any], Any, list[Any]]]":
+        """Build one interactive belief chart per variable and wire it up.
+
+        Returns ``(node, plot, outcomes)`` triples; the outcomes list fixes
+        the face order so dragged weights can be mapped back to the node's
+        real outcome objects (the widget's faces round-trip through JSON).
+        """
+        soft = dict(soft or {})
+        entries: "list[tuple[Dice[Any], Any, list[Any]]]" = []
+        for node in [*self.sources, *self.derived]:
+            if id(node) in skip_ids:
+                continue
+            posterior = self.query(node, given, soft)
+            plot = _belief_plot(posterior, touched=node in self._beliefs)
+            entries.append((node, plot, list(posterior.probs)))
+        self._wire_belief_editors(entries, given, soft)
+        return entries
+
+    def _wire_belief_editors(
+        self,
+        entries: "list[tuple[Dice[Any], Any, list[Any]]]",
+        given: "Dice[Any] | None",
+        soft: "Mapping[Dice[Any], Mapping[Any, Weight]]",
+    ) -> None:
+        # The in-widget propagation loop: a drag commit updates the plot's
+        # `variables` trait kernel-side, the observer asserts it as a
+        # belief, and the belief listener pushes fresh posteriors into
+        # every other chart — no notebook re-runs involved, so it works
+        # identically in marimo and Jupyter.
+        if not entries:
+            return
+        pushing = {"active": False}
+
+        def refresh(origin: "Dice[Any] | None") -> None:
+            if pushing["active"]:
+                return
+            pushing["active"] = True
+            try:
+                for node, plot, outcomes in entries:
+                    if node is origin and node in self._beliefs:
+                        continue  # don't repaint the editor being dragged
+                    try:
+                        posterior = self.query(node, given, soft)
+                        weights = [_plot_value(posterior.probs.get(outcome, 0)) for outcome in outcomes]
+                        faces = [_plot_value(outcome) for outcome in outcomes]
+                        plot.variables = {
+                            **plot.variables,
+                            "data": [{"i": face, "p": weight} for face, weight in zip(faces, weights)],
+                            "weights": weights,
+                            "faces": faces,
+                            "touched": node in self._beliefs,
+                        }
+                    except Exception:
+                        continue  # a stale widget (closed comm) must not break the rest
+            finally:
+                pushing["active"] = False
+
+        def on_change(change: Any, node: "Dice[Any]", outcomes: "list[Any]") -> None:
+            if pushing["active"]:
+                return
+            variables = change["new"] or {}
+            weights = variables.get("weights") or []
+            if variables.get("touched") and len(weights) == len(outcomes) and sum(weights) > 0:
+                # zip against the *original* outcomes: JSON round-trips the faces
+                node.believe(dict(zip(outcomes, weights)))
+            elif not variables.get("touched") and node in self._beliefs:
+                node.forget()
+
+        for node, plot, outcomes in entries:
+            plot.observe(
+                lambda change, node=node, outcomes=outcomes: on_change(change, node, outcomes),
+                names="variables",
+            )
+        self._belief_listeners.append(refresh)
+
     def show(
         self,
         given: "Dice[Any] | None" = None,
@@ -911,11 +1186,23 @@ class World:
         editable: "Mapping[Dice[Any], Any] | None" = None,
         evidence: "Mapping[Dice[Any], Any] | None" = None,
     ) -> Any:
-        """Render the model as a DAG of per-variable charts (marimo only).
+        """Render the model as a DAG of live, editable belief charts (marimo only).
 
         Each source and each named derived variable becomes a node,
         labelled with its Python name, with an arrow for every dependency,
         via wigglystuff's ``WidgetDAG``.
+
+        Every node is interactive by default: click ``edit`` on any node
+        and drag its bars to assert a soft belief on that variable
+        (:meth:`Dice.believe`) right in the graph — every other node's
+        posterior repaints in place, parents included, and ``reset``
+        withdraws the belief (:meth:`Dice.forget`). The update loop runs
+        through the widgets' synced state, not notebook re-runs, so
+        ``m.show()`` is the whole line: no editor cells, no evidence
+        dicts. Programmatic :meth:`Dice.believe` calls repaint the graph
+        too, and beliefs asserted by dragging are visible to ``p()`` /
+        :meth:`query` in other cells (marimo does not re-run those cells
+        on a drag — re-run to read the new posterior).
 
         ``given`` conditions the charts: pass a predicate (e.g.
         ``test == "positive"``) and every node shows its *posterior*
@@ -932,34 +1219,48 @@ class World:
         model cell on every drag, the whole graph recomputes live. This edits
         the *generative model*.
 
-        ``evidence`` maps *any* variable to a :meth:`editor` widget and treats
-        the dragged distribution as soft (Jeffrey) *evidence* on that node —
-        not a change to the model, but an observation to condition on. Belief
-        flows both ways, so dragging a child updates its parents' posteriors
-        too. Under the hood every other node is queried with this soft
-        evidence (see :meth:`query`).
+        ``evidence`` maps *any* variable to an externally-created
+        :meth:`editor` widget and treats the dragged distribution as soft
+        (Jeffrey) *evidence* on that node, via marimo reactivity. An
+        editor that has not been dragged yet is ignored — treating its
+        seed as evidence would clamp the variable to it. With the built-in
+        ``edit`` toggle this wiring is rarely needed anymore.
         """
         import marimo as mo
         from wigglystuff import WidgetDAG
 
         graph_nodes = [*self.sources, *self.derived]
         tracked_ids = {id(node) for node in graph_nodes}
-        names = {id(node): (node._name or f"var{index}") for index, node in enumerate(graph_nodes)}
+        # display names, made unique so same-named variables (e.g. built in
+        # a loop) don't silently collapse into one WidgetDAG node
+        names: dict[int, str] = {}
+        used_names: set[str] = set()
+        for index, node in enumerate(graph_nodes):
+            name = node._name or f"var{index}"
+            while name in used_names:
+                name += "'"
+            used_names.add(name)
+            names[id(node)] = name
 
         editable_by_id = {id(node): widget for node, widget in (editable or {}).items()}
         evidence_by_id = {id(node): widget for node, widget in (evidence or {}).items()}
         widget_by_id = {**editable_by_id, **evidence_by_id}
-        # dragged evidence editors become soft evidence for querying the rest
-        soft = {node: Dice.from_editor(widget).probs for node, widget in (evidence or {}).items()}
-
-        nodes: dict[str, Any] = {
-            names[id(node)]: (
-                widget_by_id[id(node)]
-                if id(node) in widget_by_id
-                else mo.ui.anywidget(self.query(node, given, soft).prob_chart())
-            )
-            for node in graph_nodes
+        # *dragged* evidence editors become soft evidence for querying the
+        # rest; untouched ones are inert rather than asserting their seed
+        soft = {
+            node: Dice.from_editor(widget).probs
+            for node, widget in (evidence or {}).items()
+            if _widget_touched(widget)
         }
+
+        entries = self._belief_entries(given, soft, skip_ids=set(widget_by_id))
+        nodes: dict[str, Any] = {}
+        interactive = {id(node): plot for node, plot, _ in entries}
+        for node in graph_nodes:
+            if id(node) in widget_by_id:
+                nodes[names[id(node)]] = widget_by_id[id(node)]
+            else:
+                nodes[names[id(node)]] = mo.ui.anywidget(interactive[id(node)])
 
         edges: list[tuple[str, str]] = []
         for source in self.sources:

@@ -386,12 +386,14 @@ def _(mo):
     ### The same inference, draggable
 
     The block above reads `p(disease, given=…)` off for a few *fixed* evidence
-    scenarios. Here is the same disease/test model, built with core `model()` and
-    rendered as a graph where each test is a **draggable belief**
-    (`show(evidence=...)`). Drag a test toward `"positive"` and the `disease`
-    posterior climbs; drag all three fully positive and you reproduce the
-    "3 observed positives" number above, with everything in between smoothly
-    interpolated. Same inference — static table vs. something you can grab.
+    scenarios. Here is the same disease/test model, built with core `model()`.
+    `clinic.show()` is the whole UI: click **edit** on any node and drag its
+    bars to assert a belief on that variable — every other node repaints in
+    place, parents included (that's `Dice.believe()` under the hood; **reset**
+    is `Dice.forget()`). Drag a test toward `"positive"` and the `disease`
+    posterior climbs; pin all three fully positive and you reproduce the
+    "3 observed positives" number above. Several dragged beliefs are satisfied
+    *jointly*, so the order you drag them in doesn't matter.
     """)
     return
 
@@ -408,27 +410,20 @@ def _(Dice, model):
         test_a = Dice.from_function(test_result_core, parents=[disease_v])
         test_b = Dice.from_function(test_result_core, parents=[disease_v])
         test_c = Dice.from_function(test_result_core, parents=[disease_v])
-    return clinic, disease_v, test_a, test_b, test_c
+    return clinic, disease_v
 
 
 @app.cell
-def _(clinic, disease_v, mo, test_a, test_b, test_c):
-    # each belief is seeded with its test's prior marginal (a no-op); drag toward
-    # "positive" to assert evidence. Created in their own cell so identity is
-    # stable across re-runs.
-
-    belief_v = mo.ui.anywidget(clinic.query(disease_v).editor(mode="locked"))
-    belief_a = mo.ui.anywidget(clinic.query(test_a).editor(mode="locked"))
-    belief_b = mo.ui.anywidget(clinic.query(test_b).editor(mode="locked"))
-    belief_c = mo.ui.anywidget(clinic.query(test_c).editor(mode="locked"))
-    return (belief_c,)
+def _(clinic):
+    clinic.show()
+    return
 
 
 @app.cell
-def _(belief_c, clinic, test_c):
-    # disease_v stays a read-only posterior chart; the three tests render as the
-    # draggable beliefs. Drag them and the disease posterior updates in response.
-    clinic.show(evidence={test_c: belief_c})
+def _(disease_v, p):
+    # beliefs dragged into the graph above are world state, not view state:
+    # re-run this cell after dragging and the posterior reflects them.
+    p(disease_v)
     return
 
 
@@ -460,11 +455,12 @@ def _(Dice, model):
 
 
     m.show()
-    return
+    return (car,)
 
 
 @app.cell
-def _():
+def _(car):
+    car.marginal()
     return
 
 

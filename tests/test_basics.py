@@ -473,3 +473,121 @@ def test_variable_rejects_missing_parents():
         # A dependent variable needs parents; a root is a bare Dice.
         with pytest.raises(TypeError):
             Dice.from_function(lambda: Dice.from_numbers(1, 2))
+
+
+# --- beliefs update in place and propagate --------------------------------
+
+
+def _clinic(tests=1):
+    """A disease with `tests` conditionally-independent noisy tests."""
+    with model() as m:
+        disease = Dice({"present": 0.01, "absent": 0.99})
+        checks = [
+            Dice.from_function(
+                lambda d: {"positive": 0.90, "negative": 0.10}
+                if d == "present"
+                else {"positive": 0.05, "negative": 0.95},
+                parents=[disease],
+            )
+            for _ in range(tests)
+        ]
+    return m, disease, checks
+
+
+def test_from_function_accepts_derived_parent():
+    with model():
+        a = Dice.from_numbers(0, 1)
+        b = Dice.from_numbers(0, 1)
+        total = a + b
+        child = Dice.from_function(
+            lambda t: {"high": 1} if t == 2 else {"low": 1},
+            parents=[total],
+        )
+    assert p(child).probs["high"] == pytest.approx(1 / 4)
+    assert p(child).probs["low"] == pytest.approx(3 / 4)
+
+
+def test_believe_propagates_to_parent_and_forget_restores():
+    _, disease, (check,) = _clinic()
+    check.believe({"positive": 1})  # a point mass is hard evidence
+    assert p(disease).probs["present"] == pytest.approx(0.1538, abs=1e-4)
+    check.forget()
+    assert p(disease).probs["present"] == pytest.approx(0.01)
+
+
+def test_believe_invalidates_cached_marginals():
+    _, disease, (check,) = _clinic()
+    positive = check == "positive"
+    prior = positive.probs[True]  # caches the lazy marginal
+    disease.believe({"present": 1})
+    assert positive.probs[True] == pytest.approx(0.90)
+    disease.forget()
+    assert positive.probs[True] == pytest.approx(prior)
+
+
+def test_multiple_beliefs_jointly_satisfied_and_order_independent():
+    belief_1 = {"positive": 0.8, "negative": 0.2}
+    belief_2 = {"positive": 0.6, "negative": 0.4}
+
+    m, disease, (check_1, check_2) = _clinic(tests=2)
+    check_1.believe(belief_1)
+    check_2.believe(belief_2)
+    # both asserted marginals hold at once (a single sequential Jeffrey
+    # pass satisfies only the last one on correlated variables)
+    assert p(check_1).probs["positive"] == pytest.approx(0.8, abs=1e-6)
+    assert p(check_2).probs["positive"] == pytest.approx(0.6, abs=1e-6)
+    posterior = p(disease).probs["present"]
+
+    # ...and the assertion order does not matter
+    m2, disease_2, (other_1, other_2) = _clinic(tests=2)
+    other_2.believe(belief_2)
+    other_1.believe(belief_1)
+    assert p(disease_2).probs["present"] == pytest.approx(posterior, rel=1e-6)
+
+    # world-level forget drops everything
+    m.forget()
+    assert not m._beliefs
+    assert p(disease).probs["present"] == pytest.approx(0.01)
+
+
+def test_believe_rejects_standalone_and_bad_weights():
+    d = Dice.from_sides(6)
+    with pytest.raises(TypeError):
+        d.believe({1: 1})
+    _, disease, _ = _clinic()
+    with pytest.raises(ValueError):
+        disease.believe({})
+
+
+def test_widget_drag_asserts_belief_and_pushes_posteriors():
+    # Simulate the frontend: a drag commit writes weights + touched into the
+    # widget's `variables` trait, which is exactly what setting the trait
+    # kernel-side does — no browser needed.
+    m, disease, (check,) = _clinic()
+    entries = {node: (plot, outcomes) for node, plot, outcomes in m._belief_entries()}
+    check_plot, check_outcomes = entries[check]
+    disease_plot, disease_outcomes = entries[disease]
+
+    weights = [1.0 if outcome == "positive" else 0.0 for outcome in check_outcomes]
+    check_plot.variables = {**check_plot.variables, "weights": weights, "touched": True}
+
+    assert check in m._beliefs
+    pushed = dict(zip(disease_outcomes, disease_plot.variables["weights"]))
+    assert pushed["present"] == pytest.approx(0.1538, abs=1e-4)
+    assert disease_plot.variables["touched"] is False
+
+    # reset withdraws the belief and repaints the prior everywhere
+    check_plot.variables = {**check_plot.variables, "touched": False}
+    assert check not in m._beliefs
+    pushed = dict(zip(disease_outcomes, disease_plot.variables["weights"]))
+    assert pushed["present"] == pytest.approx(0.01)
+
+
+def test_programmatic_believe_repaints_wired_widgets():
+    m, disease, (check,) = _clinic()
+    entries = {node: (plot, outcomes) for node, plot, outcomes in m._belief_entries()}
+    disease_plot, disease_outcomes = entries[disease]
+
+    check.believe({"positive": 1})
+    pushed = dict(zip(disease_outcomes, disease_plot.variables["weights"]))
+    assert pushed["present"] == pytest.approx(0.1538, abs=1e-4)
