@@ -1824,6 +1824,102 @@ def _():
         return bool(variables.get("touched"))
 
 
+    # -- factor-graph view widgets -------------------------------------------
+    # Small display-only charts for World.show(factors=True) / (messages=True):
+    # a CPT heatmap per real Factor, a dashed slot that lights up when a belief
+    # is asserted, and a two-row strip for the pair of sum-product messages on
+    # an edge. Axis domains are pinned to data order everywhere — Observable
+    # Plot would otherwise sort outcomes alphabetically and disagree with the
+    # variable charts.
+
+    _CPT_JS = """Plot.plot({
+        width, height,
+        marginLeft: 56, marginBottom: 26,
+        x: {label: null, domain: [...new Set(data.map((d) => d.out))]},
+        y: {label: null, domain: [...new Set(data.map((d) => d.given))]},
+        color: {domain: [0, 1], scheme: "blues"},
+        marks: [
+            Plot.cell(data, {x: "out", y: "given", fill: "p"}),
+            Plot.text(data, {x: "out", y: "given",
+                text: (d) => d.p.toFixed(2),
+                fill: (d) => (d.p > 0.55 ? "white" : "black")}),
+        ],
+    })"""
+
+    _SLOT_JS = """
+    if (!active) {
+        const div = document.createElement("div");
+        div.style.cssText = "width:" + width + "px;height:" + height + "px;" +
+            "display:flex;align-items:center;justify-content:center;" +
+            "color:#bbb;font:10px sans-serif;border:1px dashed #ccc;border-radius:4px";
+        div.textContent = "no belief";
+        return div;
+    }
+    return Plot.plot({
+        width, height,
+        marginLeft: 36, marginBottom: 22,
+        y: {domain: [0, 1], label: null},
+        x: {label: null, domain: data.map((d) => d.i)},
+        marks: [Plot.barY(data, {x: "i", y: "p", fill: "#ff725c"}), Plot.ruleY([0])],
+    });
+    """
+
+    _MESSAGE_JS = """
+    if (!active) {
+        const div = document.createElement("div");
+        div.style.cssText = "width:" + width + "px;height:" + height + "px;" +
+            "display:flex;align-items:center;justify-content:center;" +
+            "color:#bbb;font:9px sans-serif;border:1px dashed #ddd;border-radius:4px";
+        div.textContent = "no messages";
+        return div;
+    }
+    return Plot.plot({
+        width, height,
+        marginLeft: 26, marginBottom: 18, marginTop: 6, marginRight: 20,
+        x: {label: null, domain: faces, tickSize: 2},
+        fy: {label: null, domain: ["\\u2192", "\\u2190"]},
+        y: {domain: [0, 1], label: null, ticks: []},
+        marks: [
+            Plot.barY(data, {fy: "dir", x: "i", y: "p",
+                fill: (d) => (d.dir === "\\u2192" ? "#4269d0" : "#b5b9c0")}),
+            Plot.ruleY([0]),
+        ],
+    });
+    """
+
+    def _factor_chart(factor: "Factor") -> Any:
+        """A real engine :class:`Factor` as a heatmap: one row per assignment
+        of everything but the last variable, one column per outcome of it.
+        A prior factor renders as a single row. CPTs are the model, so static.
+        """
+        rows = []
+        for key, weight in factor.table.items():
+            rows.append({
+                "given": " · ".join(str(value) for value in key[:-1]) or "p",
+                "out": str(key[-1]),
+                "p": _plot_value(weight),
+            })
+        height = min(160, 46 + 24 * len({row["given"] for row in rows}))
+        return ObservablePlot(_CPT_JS, variables={"data": rows}, width=180, height=height)
+
+    def _belief_slot() -> Any:
+        """A belief's slot in the factor graph: dashed until asserted, then the
+        asserted distribution — evidence rendered as just one more (unary)
+        factor. Kept live by :meth:`World._wire_factor_view`.
+        """
+        return ObservablePlot(_SLOT_JS, variables={"data": [], "active": False}, width=150, height=90)
+
+    def _message_chart() -> Any:
+        """The pair of sum-product messages on one factor-graph edge: top row
+        flows *with* the drawn arrow, bottom row against it. Kept live by
+        :meth:`World._wire_factor_view`; dashed when the factor graph is loopy
+        (no tree messages — inference fell back to elimination).
+        """
+        return ObservablePlot(
+            _MESSAGE_JS, variables={"data": [], "faces": [], "active": False}, width=132, height=96
+        )
+
+
     class World:
         """A shared exact joint over the variables created within it.
 
@@ -2115,14 +2211,95 @@ def _():
                 )
             self._belief_listeners.append(refresh)
 
+        def _wire_factor_view(
+            self,
+            slots: "list[tuple[Any, Dice[Any]]]",
+            message_entries: "list[tuple[Any, int, Dice[Any], str]]",
+            given: "Dice[Any] | None",
+            soft: "Mapping[Dice[Any], Mapping[Any, Weight]]",
+        ) -> None:
+            # Keeps the factor view live: belief slots mirror the asserted
+            # beliefs, and message strips mirror the last calibration's edge
+            # messages. `message_entries` carry (widget, base-factor index,
+            # variable, direction): the factor index is the source's position,
+            # which is exactly its factor's position in the calibrated list.
+            if not slots and not message_entries:
+                return
+
+            def refresh(_origin: "Dice[Any] | None" = None) -> None:
+                try:
+                    if message_entries:
+                        self._posteriors(given, soft)  # refresh _last_messages
+                    messages = self._last_messages
+                    for widget, factor_index, variable, along in message_entries:
+                        try:
+                            factor_node = ("f", factor_index)
+                            variable_node = ("v", id(variable))
+                            to_variable = messages.get((factor_node, variable_node)) if messages else None
+                            to_factor = messages.get((variable_node, factor_node)) if messages else None
+                            forward, backward = (
+                                (to_factor, to_variable) if along == "vf" else (to_variable, to_factor)
+                            )
+                            support = variable._support()
+                            data = [
+                                {"dir": "→", "i": _plot_value(value), "p": _plot_value((forward or {}).get(value, 0))}
+                                for value in support
+                            ] + [
+                                {"dir": "←", "i": _plot_value(value), "p": _plot_value((backward or {}).get(value, 0))}
+                                for value in support
+                            ]
+                            widget.variables = {
+                                **widget.variables,
+                                "data": data,
+                                "faces": [_plot_value(value) for value in support],
+                                "active": bool(forward or backward),
+                            }
+                        except Exception:
+                            continue
+                    for widget, node in slots:
+                        try:
+                            belief = self._beliefs.get(node)
+                            total = sum(belief.values()) if belief else 1
+                            widget.variables = {
+                                **widget.variables,
+                                "active": belief is not None,
+                                "data": [
+                                    {"i": _plot_value(value), "p": _plot_value(weight / total)}
+                                    for value, weight in (belief or {}).items()
+                                ],
+                            }
+                        except Exception:
+                            continue
+                except Exception:
+                    pass  # e.g. transiently impossible evidence mid-drag
+            refresh()
+            self._belief_listeners.append(refresh)
+
         def show(
             self,
             given: "Dice[Any] | None" = None,
             inputs: "Mapping[Dice[Any], Any] | None" = None,
             editable: "Mapping[Dice[Any], Any] | None" = None,
             evidence: "Mapping[Dice[Any], Any] | None" = None,
+            factors: bool = False,
+            messages: bool = False,
         ) -> Any:
             """Render the model as a DAG of live, editable belief charts (marimo only).
+
+            ``factors=True`` renders the *factor graph* instead of the bare
+            DAG: a heatmap square for every real engine factor (the prior of
+            each root, the CPT of each dependent) drawn between the variables
+            it touches, plus one belief slot per variable — dashed until a
+            belief is asserted (by dragging or :meth:`Dice.believe`), then
+            showing it: evidence is just one more unary factor.
+
+            ``messages=True`` (implies ``factors=True``) additionally puts the
+            two sum-product messages of every variable–factor edge on the
+            graph as a small two-row strip — top row flows *with* the arrow,
+            bottom row against it — repainted live on every belief change, so
+            you can literally watch belief propagate along the edges. When the
+            factor graph is loopy the strips read "no messages": inference
+            fell back to exact elimination and no tree messages exist.
 
             Each source and each named derived variable becomes a node,
             labelled with its Python name, with an arrow for every dependency,
@@ -2201,8 +2378,50 @@ def _():
                     nodes[names[id(node)]] = mo.ui.anywidget(interactive[id(node)])
 
             edges: list[tuple[str, str]] = []
-            for source in self.sources:
-                edges.extend((names[id(parent)], names[id(source)]) for parent in source._parents)
+            if messages:
+                factors = True
+            if factors:
+
+                def unique(name: str) -> str:
+                    while name in nodes:
+                        name += "'"
+                    return name
+
+                message_entries: "list[tuple[Any, int, Dice[Any], str]]" = []
+
+                def route(start: str, end: str, factor_index: int, variable: "Dice[Any]", along: str) -> None:
+                    # an edge, optionally with its message strip in the middle
+                    if not messages:
+                        edges.append((start, end))
+                        return
+                    strip_name = unique(f"⇄ {names[id(variable)]}")
+                    strip = _message_chart()
+                    nodes[strip_name] = strip
+                    message_entries.append((strip, factor_index, variable, along))
+                    edges.append((start, strip_name))
+                    edges.append((strip_name, end))
+
+                for factor_index, source in enumerate(self.sources):
+                    label = names[id(source)]
+                    factor_obj = source._family_factor() if source._fn is not None else source._prior_factor()
+                    factor_name = unique(f"p({label}|…)" if source._fn is not None else f"p({label})")
+                    nodes[factor_name] = _factor_chart(factor_obj)
+                    for leaf in factor_obj.variables[:-1]:
+                        route(names[id(leaf)], factor_name, factor_index, leaf, "vf")
+                    route(factor_name, label, factor_index, source, "fv")
+
+                slots: "list[tuple[Any, Dice[Any]]]" = []
+                for node in graph_nodes:
+                    slot = _belief_slot()
+                    slot_name = unique(f"belief({names[id(node)]})")
+                    nodes[slot_name] = slot
+                    edges.append((slot_name, names[id(node)]))
+                    slots.append((slot, node))
+
+                self._wire_factor_view(slots, message_entries, given, soft)
+            else:
+                for source in self.sources:
+                    edges.extend((names[id(parent)], names[id(source)]) for parent in source._parents)
             for node in self.derived:
                 edges.extend(
                     (names[id(parent)], names[id(node)])

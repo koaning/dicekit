@@ -721,6 +721,44 @@ def test_posteriors_calibration_matches_per_node_queries():
         _assert_dist_close(posteriors[id(node)].probs, monty.query(node).probs, tol=1e-9)
 
 
+def test_factor_view_slots_and_messages_update():
+    import dicekit
+
+    m, disease, (check,) = _clinic()
+    slot = dicekit._belief_slot()
+    strip = dicekit._message_chart()
+    # factor index 1 = check's family factor (sources order: disease, check);
+    # "vf" = the strip sits on the disease -> factor edge
+    m._wire_factor_view([(slot, check)], [(strip, 1, disease, "vf")], None, {})
+
+    assert strip.variables["active"]
+    assert slot.variables["active"] is False
+
+    check.believe({"positive": 1})
+    # the factor -> disease message (against the arrow) now carries the
+    # likelihood of a positive test: 0.90 vs 0.05, normalized
+    backward = {row["i"]: row["p"] for row in strip.variables["data"] if row["dir"] == "←"}
+    assert backward["present"] == pytest.approx(0.90 / 0.95, rel=1e-6)
+    assert slot.variables["active"] is True
+    assert {row["i"]: row["p"] for row in slot.variables["data"]} == {"positive": 1.0}
+
+    check.forget()
+    assert slot.variables["active"] is False
+
+    # a loopy factor graph (two families sharing two parents): no tree
+    # messages exist — inference falls back to elimination, strip goes dark
+    with model() as loopy:
+        a = Dice.from_numbers(0, 1)
+        b = Dice.from_numbers(0, 1)
+        c1 = Dice.from_function(lambda x, y: {x ^ y: 0.9, 1 - (x ^ y): 0.1}, parents=[a, b])
+        c2 = Dice.from_function(lambda x, y: {x & y: 0.8, 1 - (x & y): 0.2}, parents=[a, b])
+    loopy_strip = dicekit._message_chart()
+    loopy._wire_factor_view([], [(loopy_strip, 2, a, "vf")], None, {})
+    assert loopy_strip.variables["active"] is False
+    # ...while queries stay exact via elimination
+    assert loopy.query(c1).probs[1] == pytest.approx(0.5)
+
+
 def test_displayed_model_variable_is_live():
     # a model variable displays as one wired chart (reused across renders)
     # that repaints when the model's beliefs change
